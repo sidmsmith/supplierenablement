@@ -14,7 +14,10 @@ if str(ROOT) not in sys.path:
 
 from mawm_client import get_manhattan_token, normalize_token, validate_org  # noqa: E402
 from se_service import (  # noqa: E402
+    build_labels_pdf_for_asn,
     create_asn_from_staged,
+    create_lpns_and_list,
+    load_asn_lines_for_lpn_creation,
     load_pos_detail,
     match_preload_entries,
     preload_po_index,
@@ -27,7 +30,7 @@ PASSWORD = os.getenv("MANHATTAN_PASSWORD")
 CLIENT_SECRET = os.getenv("MANHATTAN_SECRET")
 USAGE_INGEST_URL = os.getenv("MANHATTAN_USAGE_INGEST_URL", "").strip()
 APP_NAME = "supplierenablement-app"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 DEFAULT_ORG = os.getenv("MANHATTAN_DEFAULT_ORG", "SS-DEMO").strip().upper() or "SS-DEMO"
 TOKEN_FILE = ROOT / ".token"
 
@@ -253,6 +256,96 @@ def create_asn():
         return jsonify(result)
     except Exception as e:
         print(f"[CREATE_ASN] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/load_asn_for_lpn", methods=["POST"])
+def load_asn_for_lpn():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    asn_id = (data.get("asnId") or data.get("asn_id") or "").strip()
+    try:
+        result = load_asn_lines_for_lpn_creation(
+            token, org, asn_id, location=location
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"[LOAD_ASN_FOR_LPN] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/create_lpns", methods=["POST"])
+def create_lpns_route():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    asn_id = (data.get("asnId") or data.get("asn_id") or "").strip()
+    lines = data.get("lines") or []
+    try:
+        result = create_lpns_and_list(
+            token,
+            org,
+            asn_id,
+            lines,
+            location=location,
+        )
+        forward_usage_event(
+            {
+                "app": APP_NAME,
+                "version": APP_VERSION,
+                "event": "create_lpns_completed"
+                if result.get("success")
+                else "create_lpns_failed",
+                "org": org,
+                "asnId": asn_id,
+                "lpnCount": result.get("lpnCount") or 0,
+            }
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"[CREATE_LPNS] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/download_lpn_labels", methods=["POST"])
+def download_lpn_labels():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    asn_id = (data.get("asnId") or data.get("asn_id") or "").strip()
+    lines = data.get("lpns") or data.get("lines") or None
+    expected = int(data.get("expectedLpnCount") or data.get("expected_lpn_count") or 0)
+    try:
+        result = build_labels_pdf_for_asn(
+            token,
+            org,
+            asn_id,
+            location=location,
+            lpns=lines,
+            expected_lpn_count=expected,
+        )
+        forward_usage_event(
+            {
+                "app": APP_NAME,
+                "version": APP_VERSION,
+                "event": "download_lpn_labels"
+                if result.get("success")
+                else "download_lpn_labels_failed",
+                "org": org,
+                "asnId": asn_id,
+                "lpnCount": result.get("lpnCount") or 0,
+            }
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"[DOWNLOAD_LPN_LABELS] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

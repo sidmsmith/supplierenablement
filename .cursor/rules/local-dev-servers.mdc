@@ -1,0 +1,46 @@
+---
+description: Supplier Enablement local Flask + npm servers — restart when API/UI code changes
+alwaysApply: true
+---
+
+# Supplier Enablement — local servers
+
+When working on **supplierenablement**, the agent owns starting/restarting local servers. Do **not** ask the user to restart Flask or npm.
+
+## Architecture
+
+| Process | Command | URL | When to restart |
+|---------|---------|-----|-----------------|
+| Flask API | `python api/index.py` from `supplierenablement/` | `http://127.0.0.1:5000` | After changes to `api/`, `mawm_client.py`, `se_service.py`, `cli_utils.py`, or Python deps |
+| Express UI | `npm start` from `supplierenablement/` | `http://localhost:3010` | After changes to `server.js` or `package.json` (static `public/` files usually just need a browser hard-refresh) |
+
+UI at **3010** proxies `/api` → Flask on **5000**.
+
+## Agent duties
+
+1. After backend (Python) changes that affect running behavior, **restart Flask** before asking the user to test.
+2. After `server.js` / dependency changes, **restart npm**.
+3. For `public/*.js|html|css` only: tell the user to hard-refresh the browser; restart npm only if the proxy/static server looks stale or broken.
+4. If ports are busy or the app errors with connection refused, free the port and start both servers.
+5. Prefer background shells; do not leave the user to run these commands themselves.
+
+## Restart pattern (Windows PowerShell)
+
+From `supplierenablement/`:
+
+```powershell
+# Stop listeners on API / UI ports (ignore errors if nothing is listening)
+Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Get-NetTCPConnection -LocalPort 3010 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+
+# Start API then UI (background)
+python api\index.py
+npm start
+```
+
+Confirm Flask shows `Running on http://127.0.0.1:5000` and npm shows `Supplier Enablement on http://localhost:3010`.
+
+## Auth / secrets
+
+- Local auth uses gitignored `.token` and/or `MANHATTAN_PASSWORD` / `MANHATTAN_SECRET`.
+- Never commit `.token` or paste secrets into rules/commits.

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Supplier Enablement v0.1.1</title>
-  <!-- v0.1.1: Create ASN from PO — desktop + mobile UI -->
+  <title>Supplier Enablement v0.2.0</title>
+  <!-- v0.2.0: Create ASN from PO + Create LPNs -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet" />
   <style>
@@ -442,6 +442,7 @@
       overflow: hidden;
       box-shadow: 0 20px 50px rgba(0,0,0,0.35);
     }
+    .modal-card.modal-card-wide { width: min(1080px, 100%); }
     .modal-card .modal-head {
       padding: 0.9rem 1.1rem;
       border-bottom: 1px solid var(--border);
@@ -456,6 +457,88 @@
       display: flex;
       justify-content: flex-end;
       gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .lpn-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      table-layout: fixed;
+    }
+    .lpn-table th, .lpn-table td {
+      border-bottom: 1px solid var(--border);
+      padding: 0.55rem 0.4rem;
+      vertical-align: middle;
+    }
+    .lpn-table th { color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+    .lpn-table .qty-input { width: 5.5rem; max-width: 100%; min-width: 0; }
+    .lpn-table .lpn-col-item { width: 18%; }
+    .lpn-table .lpn-col-desc { width: 24%; }
+    .lpn-table .lpn-col-qty { width: 9%; }
+    .lpn-table .lpn-col-input { width: 10%; }
+    .lpn-table .lpn-col-creates { width: 12rem; }
+    .lpn-pred {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      min-height: 2.5em;
+      line-height: 1.25;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .lpn-table .lpn-pred {
+      min-width: 10.5rem;
+      width: 100%;
+    }
+    .lpn-pred.invalid { color: var(--red-text); }
+    .lpn-total {
+      min-height: 1.5em;
+      font-weight: 600;
+    }
+    .lpn-id-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.75rem;
+    }
+    .lpn-id-chip {
+      display: inline-block;
+      padding: 0.35rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--primary);
+      user-select: all;
+    }
+    @media (max-width: 992px) {
+      .lpn-desktop-only { display: none !important; }
+      .lpn-mobile-cards { display: block; }
+      .lpn-mobile-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.75rem;
+        margin-bottom: 0.65rem;
+        background: var(--input-bg);
+      }
+      .lpn-mobile-card .lpn-assign-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
+      .lpn-mobile-card label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        display: block;
+        margin-bottom: 0.15rem;
+      }
+      .lpn-mobile-card .qty-input { width: 100%; }
+    }
+    @media (min-width: 993px) {
+      .lpn-mobile-cards { display: none !important; }
     }
     .summary-table { width: 100%; font-size: 0.85rem; }
     .summary-table td { padding: 0.3rem 0.4rem; border-top: 1px solid var(--border); }
@@ -832,8 +915,28 @@
     <div class="modal-card">
       <div class="modal-head" id="resultsHead">Result</div>
       <div class="modal-body" id="resultsBody"></div>
+      <div class="modal-foot" id="resultsFoot">
+        <button type="button" class="btn btn-outline-secondary" id="resultsCreateLpns" style="display:none;">
+          <i class="fas fa-boxes"></i> Create LPNs
+        </button>
+        <button type="button" class="btn btn-outline-primary" id="resultsDownloadLabels" style="display:none;">
+          <i class="fas fa-file-pdf"></i> Download Labels
+        </button>
+        <button type="button" class="btn btn-primary" id="resultsOk">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create LPNs modal -->
+  <div class="modal-overlay" id="lpnModal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head" id="lpnHead">Create LPNs</div>
+      <div class="modal-body" id="lpnBody"></div>
       <div class="modal-foot">
-        <button type="button" class="btn btn-primary" id="resultsOk">OK</button>
+        <button type="button" class="btn btn-outline-secondary" id="lpnCancel">Cancel</button>
+        <button type="button" class="btn btn-success" id="lpnCreateBtn">
+          <i class="fas fa-boxes"></i> Create LPNs
+        </button>
       </div>
     </div>
   </div>

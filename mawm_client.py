@@ -20,8 +20,10 @@ PO_LINE_SEARCH_URL = f"{HOST}/receiving/api/receiving/purchaseOrderLine/search"
 ASN_SEARCH_URL = f"{HOST}/receiving/api/receiving/asn/search"
 ASN_SAVE_URL = f"{HOST}/receiving/api/receiving/asn/save"
 ASN_BULK_IMPORT_URL = f"{HOST}/receiving/api/receiving/asn/bulkImport"
+ASN_LPN_CREATE_URL = f"{HOST}/receiving/api/receiving/ui/lpn/create"
 NEXTUP_URL = f"{HOST}/receiving/api/nextup/getNextupNumbersByCounterType"
 ITEM_SEARCH_URL = f"{HOST}/item-master/api/item-master/item/search"
+ILPN_SEARCH_URL = f"{HOST}/dcinventory/api/dcinventory/ilpn/search"
 
 USERNAME_BASE = os.getenv("MANHATTAN_USERNAME_BASE", "sdtadmin@")
 CLIENT_ID = os.getenv("MANHATTAN_CLIENT_ID", "omnicomponent.1.0.0")
@@ -457,7 +459,11 @@ def search_items(
 
 def search_asn(asn_id: str, token: str, org: str, location: str = None) -> Optional[dict]:
     token = normalize_token(token)
-    payload = {"Query": f"AsnId ='{asn_id}'"}
+    payload = {
+        "Query": f"AsnId ='{asn_id}'",
+        "Size": 5,
+        "Page": 0,
+    }
     response = _post(
         ASN_SEARCH_URL,
         headers=build_receiving_headers(token, org, location=location),
@@ -469,6 +475,92 @@ def search_asn(asn_id: str, token: str, org: str, location: str = None) -> Optio
         )
     data = _response_data_list(response.json())
     return data[0] if data else None
+
+
+def create_lpns(
+    payload: List[dict], token: str, org: str, location: str = None
+) -> requests.Response:
+    """POST receiving UI LPN create. Body is an array of line cartonize rows."""
+    token = normalize_token(token)
+    return _post(
+        ASN_LPN_CREATE_URL,
+        headers=build_receiving_headers(token, org, location=location),
+        json=payload,
+    )
+
+
+def search_ilpns_by_asn(
+    asn_id: str, token: str, org: str, location: str = None, size: int = 200
+) -> List[dict]:
+    token = normalize_token(token)
+    payload = {
+        "Query": f"AsnId ='{asn_id}'",
+        "Size": size,
+        "Page": 0,
+    }
+    response = _post(
+        ILPN_SEARCH_URL,
+        headers=build_receiving_headers(token, org, location=location),
+        json=payload,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"iLPN search failed: {response.status_code} {response.text[:500]}"
+        )
+    return _response_data_list(response.json())
+
+
+def search_purchase_orders(
+    po_ids: List[str], token: str, org: str, location: str = None
+) -> Dict[str, dict]:
+    """Return map PurchaseOrderId -> PO header dict."""
+    ids = [str(p).strip() for p in (po_ids or []) if str(p).strip()]
+    if not ids:
+        return {}
+    token = normalize_token(token)
+    headers = build_receiving_headers(token, org, location=location)
+    out: Dict[str, dict] = {}
+    # Batch OR query in chunks to keep Query reasonable
+    chunk_size = 20
+    for i in range(0, len(ids), chunk_size):
+        chunk = ids[i : i + chunk_size]
+        if len(chunk) == 1:
+            query = f"PurchaseOrderId ='{chunk[0]}'"
+        else:
+            quoted = ", ".join(f"'{pid}'" for pid in chunk)
+            query = f"PurchaseOrderId in ({quoted})"
+        response = _post(
+            PO_SEARCH_URL,
+            headers=headers,
+            json={"Query": query, "Size": max(50, len(chunk)), "Page": 0},
+        )
+        if response.status_code != 200:
+            print(f"Warning: PO search failed: {response.status_code}")
+            continue
+        for row in _response_data_list(response.json()):
+            pid = str(row.get("PurchaseOrderId") or "")
+            if pid:
+                out[pid] = row
+    return out
+
+
+def render_zpl_labels_pdf(zpl: str, width_in: float = 4.0, height_in: float = 6.0) -> bytes:
+    """Convert one or more ZPL labels to a multi-page PDF via Labelary."""
+    url = (
+        f"http://api.labelary.com/v1/printers/8dpmm/labels/"
+        f"{width_in}x{height_in}/"
+    )
+    response = _post(
+        url,
+        headers={"Accept": "application/pdf"},
+        data=zpl.encode("utf-8"),
+        timeout=120,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Labelary PDF failed ({response.status_code}): {response.text[:400]}"
+        )
+    return response.content
 
 
 def qty_for_payload(value) -> Union[float, int]:

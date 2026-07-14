@@ -9,6 +9,10 @@
     expanded: {},
     staged: {}, // key: poId|lineId -> { line payload + assignQty }
     preview: null,
+    lastAsn: null, // { asnId, facility, edd } after successful create
+    lastLpns: [], // enriched iLPNs after create_lpns (for label PDF)
+    lastExpectedLpnCount: 0,
+    lpnLines: [],
     sortKey: "purchaseOrderId",
     sortAsc: true,
     sheetPoIdx: -1,
@@ -58,6 +62,13 @@
     resultsHead: document.getElementById("resultsHead"),
     resultsBody: document.getElementById("resultsBody"),
     resultsOk: document.getElementById("resultsOk"),
+    resultsCreateLpns: document.getElementById("resultsCreateLpns"),
+    resultsDownloadLabels: document.getElementById("resultsDownloadLabels"),
+    lpnModal: document.getElementById("lpnModal"),
+    lpnHead: document.getElementById("lpnHead"),
+    lpnBody: document.getElementById("lpnBody"),
+    lpnCancel: document.getElementById("lpnCancel"),
+    lpnCreateBtn: document.getElementById("lpnCreateBtn"),
     busyOverlay: document.getElementById("busyOverlay"),
     themeLogo: document.getElementById("themeLogo"),
     themeSelectorBtn: document.getElementById("themeSelectorBtn"),
@@ -1146,13 +1157,14 @@
     setBusy(true, "Creating ASN…");
     closeModal(el.confirmModal);
     try {
+      const previewAsnId = state.preview.asnId;
       const data = await api("create_asn", {
         org: state.org,
         token: state.token,
         location: facility,
         facility,
         edd,
-        asnId: state.preview.asnId,
+        asnId: previewAsnId,
         lines: stagedList(),
       });
       const ok = !!data.success;
@@ -1166,7 +1178,7 @@
         .join("");
       el.resultsBody.innerHTML = `
         <p>${ok ? data.message || "Success" : data.error || "Failed"}</p>
-        <p><strong>ASN:</strong> ${data.asnId || state.preview.asnId}</p>
+        <p><strong>ASN:</strong> ${data.asnId || previewAsnId}</p>
         <p><strong>Facility:</strong> ${data.facility || facility}</p>
         <p><strong>EDD:</strong> ${data.edd || edd}</p>
         ${steps ? `<table class="summary-table"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ""}
@@ -1174,15 +1186,321 @@
       if (ok) {
         state.staged = {};
         state.preview = null;
+        state.lastAsn = {
+          asnId: data.asnId || previewAsnId,
+          facility: data.facility || facility,
+          edd: data.edd || edd,
+        };
+        state.lastLpns = [];
+        state.lastExpectedLpnCount = 0;
         updateStageUi();
         renderPoCards();
+        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
+        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      } else {
+        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
       }
       openModal(el.resultsModal);
     } catch (e) {
       el.resultsHead.className = "modal-head error";
       el.resultsHead.textContent = "Create Failed";
       el.resultsBody.innerHTML = `<p>${e.message || String(e)}</p>`;
+      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
       openModal(el.resultsModal);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function predictedLpnCount(cartonize, standard) {
+    const c = Number(cartonize);
+    const s = Number(standard);
+    if (!(c > 0) || !(s > 0)) return 0;
+    // Residual LPN allowed: 10 @ 6 → 2 LPNs (6 + 4)
+    return Math.ceil(c / s);
+  }
+
+  function fmtLpnCount(n) {
+    return n === 1 ? "1 LPN" : n + " LPNs";
+  }
+
+  function collectLpnFormLines() {
+    return (state.lpnLines || []).map((line, idx) => {
+      const cartonizeEl = el.lpnBody.querySelector(
+        `[data-lpn-cartonize="${idx}"]`
+      );
+      const standardEl = el.lpnBody.querySelector(
+        `[data-lpn-standard="${idx}"]`
+      );
+      const cartonize = cartonizeEl ? Number(cartonizeEl.value) : line.quantityToCartonize;
+      const standard = standardEl ? Number(standardEl.value) : line.standardIlpnQuantity;
+      return {
+        asnLineId: line.asnLineId,
+        itemId: line.itemId,
+        availableQtyForLpnCreation: line.availableQtyForLpnCreation,
+        shippedQuantity: line.shippedQuantity,
+        quantityToCartonize: cartonize,
+        standardIlpnQuantity: standard,
+      };
+    });
+  }
+
+  function updateLpnPredictions() {
+    let total = 0;
+    let valid = true;
+    (state.lpnLines || []).forEach((line, idx) => {
+      const cartonizeEl = el.lpnBody.querySelector(
+        `[data-lpn-cartonize="${idx}"]`
+      );
+      const standardEl = el.lpnBody.querySelector(
+        `[data-lpn-standard="${idx}"]`
+      );
+      const predEls = el.lpnBody.querySelectorAll(`[data-lpn-pred="${idx}"]`);
+      const cartonize = cartonizeEl ? Number(cartonizeEl.value) : 0;
+      const standard = standardEl ? Number(standardEl.value) : 0;
+      const available = Number(line.availableQtyForLpnCreation);
+      let msg = "";
+      let ok = true;
+      if (!(cartonize > 0) || !(standard > 0)) {
+        ok = false;
+        msg = "Enter qtys";
+      } else if (cartonize > available) {
+        ok = false;
+        msg = "Over available";
+      } else if (standard > cartonize) {
+        ok = false;
+        msg = "Std > cartonize";
+      } else {
+        const n = predictedLpnCount(cartonize, standard);
+        total += n;
+        const rem = cartonize % standard;
+        msg =
+          rem === 0
+            ? fmtLpnCount(n)
+            : fmtLpnCount(n) + " (incl. residual " + rem + ")";
+      }
+      if (!ok) valid = false;
+      predEls.forEach((node) => {
+        node.innerHTML = msg;
+        node.classList.toggle("invalid", !ok);
+      });
+    });
+    const footer = el.lpnBody.querySelector("[data-lpn-total]");
+    if (footer) {
+      footer.textContent = valid
+        ? "Total " + fmtLpnCount(total)
+        : "Fix quantities to continue";
+    }
+    if (el.lpnCreateBtn) el.lpnCreateBtn.disabled = !valid || !(state.lpnLines || []).length;
+  }
+
+  function renderLpnModalBody(asnId, lines) {
+    if (!lines.length) {
+      return `<p style="color:var(--text-muted)">No ASN lines with available quantity for LPN creation.</p>`;
+    }
+    const mobile = window.matchMedia("(max-width: 992px)").matches;
+    if (mobile) {
+      const cards = lines
+        .map((line, idx) => {
+          return `<div class="lpn-mobile-card">
+            <div class="sheet-line-item">${escapeHtml(line.itemId)} ${renderItemImage(line.itemImageUrl)}</div>
+            <div class="sheet-line-desc">${escapeHtml(line.description || "")}</div>
+            <div class="sheet-line-qtys" style="grid-template-columns:1fr 1fr;">
+              <div>Available<strong>${fmtQty(line.availableQtyForLpnCreation)}</strong></div>
+              <div>Shipped<strong>${fmtQty(line.shippedQuantity)}</strong></div>
+            </div>
+            <div class="lpn-assign-grid">
+              <div>
+                <label>Qty to cartonize</label>
+                <input class="form-control form-control-sm qty-input" type="number" min="0" step="any"
+                  data-lpn-cartonize="${idx}" value="${fmtQty(line.quantityToCartonize)}" />
+              </div>
+              <div>
+                <label>Std iLPN qty</label>
+                <input class="form-control form-control-sm qty-input" type="number" min="0" step="any"
+                  data-lpn-standard="${idx}" value="${fmtQty(line.standardIlpnQuantity)}" />
+              </div>
+            </div>
+            <div class="lpn-pred mt-2" data-lpn-pred="${idx}"></div>
+          </div>`;
+        })
+        .join("");
+      return `
+        <p class="mb-2" style="color:var(--text-secondary)">
+          ASN <strong>${escapeHtml(asnId)}</strong> · set cartonize and standard iLPN quantity per line.
+        </p>
+        <div class="lpn-mobile-cards" style="display:block">${cards}</div>
+        <p class="mb-0 mt-2 lpn-total" data-lpn-total></p>
+      `;
+    }
+    const rows = lines
+      .map((line, idx) => {
+        return `<tr>
+          <td class="lpn-col-item col-item"><span class="item-cell"><span>${escapeHtml(line.itemId)}</span>${renderItemImage(line.itemImageUrl)}</span></td>
+          <td class="lpn-col-desc" title="${escapeHtml(line.description || "")}">${escapeHtml(line.description || "")}</td>
+          <td class="lpn-col-qty">${fmtQty(line.availableQtyForLpnCreation)}</td>
+          <td class="lpn-col-qty">${fmtQty(line.shippedQuantity)}</td>
+          <td class="lpn-col-input"><input class="form-control form-control-sm qty-input" type="number" min="0" step="any"
+            data-lpn-cartonize="${idx}" value="${fmtQty(line.quantityToCartonize)}" /></td>
+          <td class="lpn-col-input"><input class="form-control form-control-sm qty-input" type="number" min="0" step="any"
+            data-lpn-standard="${idx}" value="${fmtQty(line.standardIlpnQuantity)}" /></td>
+          <td class="lpn-col-creates"><span class="lpn-pred" data-lpn-pred="${idx}"></span></td>
+        </tr>`;
+      })
+      .join("");
+    return `
+      <p class="mb-2" style="color:var(--text-secondary)">
+        ASN <strong>${escapeHtml(asnId)}</strong> · set cartonize and standard iLPN quantity per line.
+      </p>
+      <div style="overflow-x:auto;">
+        <table class="lpn-table">
+          <thead><tr>
+            <th class="lpn-col-item">Item</th>
+            <th class="lpn-col-desc">Description</th>
+            <th class="lpn-col-qty">Available</th>
+            <th class="lpn-col-qty">Shipped</th>
+            <th class="lpn-col-input">Cartonize</th>
+            <th class="lpn-col-input">Std iLPN</th>
+            <th class="lpn-col-creates">Creates</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="mb-0 mt-2 lpn-total" data-lpn-total></p>
+    `;
+  }
+
+  async function openCreateLpnsFromResults() {
+    if (!state.lastAsn || !state.lastAsn.asnId) return;
+    closeModal(el.resultsModal);
+    setBusy(true, "Loading ASN lines…");
+    try {
+      const data = await api("load_asn_for_lpn", {
+        org: state.org,
+        token: state.token,
+        location: state.lastAsn.facility || state.facility,
+        asnId: state.lastAsn.asnId,
+      });
+      if (!data.success) {
+        alert(data.error || "Could not load ASN for LPN creation");
+        openModal(el.resultsModal);
+        return;
+      }
+      state.lpnLines = data.lines || [];
+      el.lpnHead.textContent = "Create LPNs for " + state.lastAsn.asnId;
+      el.lpnBody.innerHTML = renderLpnModalBody(state.lastAsn.asnId, state.lpnLines);
+      el.lpnBody.querySelectorAll("[data-lpn-cartonize], [data-lpn-standard]").forEach((input) => {
+        input.addEventListener("input", updateLpnPredictions);
+        input.addEventListener("change", updateLpnPredictions);
+      });
+      if (typeof window.bindItemImagePreview === "function") {
+        delete el.lpnBody.dataset.itemImagePreviewBound;
+        window.bindItemImagePreview(el.lpnBody);
+      }
+      updateLpnPredictions();
+      openModal(el.lpnModal);
+    } catch (e) {
+      alert(e.message || String(e));
+      openModal(el.resultsModal);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCreateLpns() {
+    if (!state.lastAsn || !state.lastAsn.asnId) return;
+    const lines = collectLpnFormLines();
+    setBusy(true, "Creating LPNs…");
+    closeModal(el.lpnModal);
+    try {
+      const data = await api("create_lpns", {
+        org: state.org,
+        token: state.token,
+        location: state.lastAsn.facility || state.facility,
+        asnId: state.lastAsn.asnId,
+        lines,
+      });
+      const ok = !!data.success;
+      el.resultsHead.className = "modal-head " + (ok ? "success" : "error");
+      el.resultsHead.textContent = ok ? "LPNs Created" : "LPN Create Failed";
+      const chips = (data.lpns || [])
+        .map((l) => `<span class="lpn-id-chip">${escapeHtml(l.ilpnId)}</span>`)
+        .join("");
+      const steps = (data.steps || [])
+        .map(
+          (s) =>
+            `<tr><td>${escapeHtml(s.step)}</td><td>${s.statusCode}</td><td>${s.ok ? "OK" : "FAIL"}</td></tr>`
+        )
+        .join("");
+      el.resultsBody.innerHTML = `
+        <p>${escapeHtml(ok ? data.message || "Success" : data.error || "Failed")}</p>
+        <p><strong>ASN:</strong> ${escapeHtml(data.asnId || state.lastAsn.asnId)}</p>
+        <p><strong>Expected:</strong> ${fmtLpnCount(data.expectedLpnCount || 0)}
+          · <strong>Found:</strong> ${fmtLpnCount(data.lpnCount || 0)}</p>
+        ${chips ? `<div class="lpn-id-list">${chips}</div>` : ""}
+        ${steps ? `<table class="summary-table mt-3"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ""}
+      `;
+      if (ok && (data.lpns || []).length) {
+        state.lastLpns = data.lpns || [];
+        state.lastExpectedLpnCount = data.expectedLpnCount || (data.lpns || []).length;
+        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "";
+        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+      } else {
+        state.lastLpns = [];
+        state.lastExpectedLpnCount = data.expectedLpnCount || 0;
+        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+        if (el.resultsCreateLpns) {
+          el.resultsCreateLpns.style.display =
+            ok && (data.lpnCount || 0) === 0 ? "" : ok ? "none" : "";
+        }
+      }
+      openModal(el.resultsModal);
+    } catch (e) {
+      el.resultsHead.className = "modal-head error";
+      el.resultsHead.textContent = "LPN Create Failed";
+      el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
+      state.lastLpns = [];
+      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
+      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      openModal(el.resultsModal);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadLpnLabels() {
+    if (!state.lastAsn || !state.lastAsn.asnId) return;
+    setBusy(true, "Building label PDF…");
+    try {
+      const data = await api("download_lpn_labels", {
+        org: state.org,
+        token: state.token,
+        location: state.lastAsn.facility || state.facility,
+        asnId: state.lastAsn.asnId,
+        lpns: state.lastLpns || [],
+        expectedLpnCount: state.lastExpectedLpnCount || 0,
+      });
+      if (!data.success || !data.pdfBase64) {
+        alert(data.error || "Could not generate label PDF");
+        return;
+      }
+      if (data.lpns && data.lpns.length) state.lastLpns = data.lpns;
+      const bin = atob(data.pdfBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: data.contentType || "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename || state.lastAsn.asnId + "-labels.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e.message || String(e));
     } finally {
       setBusy(false);
     }
@@ -1293,6 +1611,24 @@
   });
   el.confirmCreate.addEventListener("click", confirmCreate);
   el.resultsOk.addEventListener("click", refreshAfterResults);
+  if (el.resultsCreateLpns) {
+    el.resultsCreateLpns.addEventListener("click", openCreateLpnsFromResults);
+  }
+  if (el.resultsDownloadLabels) {
+    el.resultsDownloadLabels.addEventListener("click", downloadLpnLabels);
+  }
+  if (el.lpnCancel) {
+    el.lpnCancel.addEventListener("click", () => {
+      closeModal(el.lpnModal);
+      if (state.lastAsn) {
+        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
+        openModal(el.resultsModal);
+      }
+    });
+  }
+  if (el.lpnCreateBtn) {
+    el.lpnCreateBtn.addEventListener("click", confirmCreateLpns);
+  }
 
   restoreColumns();
   updateLoadButton();
