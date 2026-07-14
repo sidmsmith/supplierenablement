@@ -1,0 +1,17 @@
+{
+  "name": "supplierenablement",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node server.js"
+  },
+  "description": "Supplier Enablement — Create ASN from PO",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.21.2",
+    "node-fetch": "^2.7.0"
+  },
+  "license": "ISC",
+  "type": "commonjs"
+}
