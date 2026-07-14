@@ -16,7 +16,7 @@ npm install
 
 ### Local web (Vercel-style)
 
-**Preferred (local):** put a Bearer access token in `.token` (gitignored) at the project root — same file as the CLI. On load the UI briefly shows the ORG gate, then authenticates from `.token` (default ORG `SS-DEMO`).
+**Preferred (local):** put a Bearer access token in `.token` at the project root (gitignored — never committed). The UI always prompts for ORG unless you pass `?Organization=…` in the URL. After you enter ORG, auth uses `.token` locally (or OAuth env vars on Vercel).
 
 ```powershell
 # .token already filled from CLI use
@@ -25,7 +25,7 @@ npm start
 # Flask API in another window: python api/index.py
 ```
 
-**Optional (Vercel / no .token):** set `MANHATTAN_PASSWORD` and `MANHATTAN_SECRET` for OAuth instead.
+**Optional (Vercel / no .token):** set `MANHATTAN_PASSWORD` and `MANHATTAN_SECRET` for OAuth instead. Without `?Organization=`, the live app also prompts for ORG.
 
 ## URL parameters
 

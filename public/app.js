@@ -232,6 +232,7 @@
             : "";
       setStatus("Authenticated " + via + ". Preloading POs…", "success");
       await preload();
+      await applyUrlBootOptions();
       return true;
     } catch (e) {
       setStatus(e.message || String(e), "error");
@@ -1337,35 +1338,44 @@
     "Facility",
     "facility",
   ]).toUpperCase();
-  const defaultOrg = (autoOrg || el.org.value || "SS-DEMO").trim().toUpperCase();
-  el.org.value = defaultOrg;
 
+  let urlBootApplied = false;
+  async function applyUrlBootOptions() {
+    if (urlBootApplied) return;
+    urlBootApplied = true;
+    if (urlFacility) state.facility = urlFacility;
+    if (!urlCriteria) return;
+    el.criteria.value = urlCriteria.replace(/;/g, "; ");
+    updateLoadButton();
+    if (!el.loadPosBtn.disabled) await loadPos();
+  }
+
+  // Query Theme=N hides picker like other apps
+  if ((params.get("Theme") || "").toLowerCase() === "n") {
+    el.themeSelectorBtn.style.display = "none";
+  }
+
+  // Prompt for ORG unless Organization (or alias) is in the URL.
+  // Local .token is gitignored and never shipped to Vercel; OAuth env is used there.
   (async function bootAuth() {
-    setStatus("Checking .token / authentication…");
-    setBusy(true, "Authenticating…");
-    const ok = await authenticate(defaultOrg, { quiet: true });
-    setBusy(false);
-    if (!ok) {
+    if (!autoOrg) {
+      el.org.value = "";
       el.orgSection.style.display = "block";
       el.mainUI.style.display = "none";
       el.org.focus();
       setStatus("Enter ORG and press Enter to authenticate", "");
       return;
     }
-    if (urlFacility) {
-      state.facility = urlFacility;
-    }
-    if (urlCriteria) {
-      el.criteria.value = urlCriteria.replace(/;/g, "; ");
-      updateLoadButton();
-      if (!el.loadPosBtn.disabled) {
-        await loadPos();
-      }
+    el.org.value = autoOrg.toUpperCase();
+    setBusy(true, "Authenticating…");
+    setStatus("Authenticating…");
+    const ok = await authenticate(autoOrg, { quiet: true });
+    setBusy(false);
+    if (!ok) {
+      el.orgSection.style.display = "block";
+      el.mainUI.style.display = "none";
+      el.org.focus();
+      setStatus("Enter ORG and press Enter to authenticate", "");
     }
   })();
-
-  // Query Theme=N hides picker like other apps
-  if ((params.get("Theme") || "").toLowerCase() === "n") {
-    el.themeSelectorBtn.style.display = "none";
-  }
 })();
