@@ -1,0 +1,20 @@
+---
+description: Always commit and push Supplier Enablement changes after each completed update
+alwaysApply: true
+---
+
+# Supplier Enablement — commit & push after updates
+
+When working on **supplierenablement**, after finishing a user-requested code/UI/docs change that leaves a dirty working tree:
+
+1. **Commit** the relevant files (exclude secrets like `.token`).
+2. **Push** to `origin` on the current branch (`git push -u origin HEAD`).
+3. Do this **without waiting** for the user to ask again.
+
+## Scope
+
+- Applies to feature work, bugfixes, styling, README, and Cursor rules in this repo.
+- Skip empty commits if there is nothing to commit.
+- Never force-push or amend unless the user explicitly asks.
+- Never commit `.token`, credentials, or other gitignored secrets.
+- Prefer writing UTF-8 **without BOM** (PowerShell `Set-Content` can break Vercel `package.json` parsing).
