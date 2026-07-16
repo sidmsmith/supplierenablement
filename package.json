@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "supplierenablement",
   "version": "0.2.1",
   "private": true,
@@ -6,7 +6,7 @@
     "dev": "vercel dev",
     "start": "node server.js"
   },
-  "description": "Supplier Enablement â€” Create ASN from PO",
+  "description": "Supplier Enablement - Create ASN from PO",
   "main": "server.js",
   "dependencies": {
     "express": "^4.21.2",

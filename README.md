@@ -1,4 +1,4 @@
-﻿# Supplier Enablement v0.2.1
+# Supplier Enablement v0.2.1
 
 CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs** against the MAWM demo environment (`salep.sce.manh.com`).
 
@@ -29,7 +29,7 @@ npm install
 
 ### Local web
 
-1. Put a Bearer access token in `.token` at the project root (**gitignored â€” never commit**).
+1. Put a Bearer access token in `.token` at the project root (**gitignored — never commit**).
 2. Start API and UI in two terminals:
 
 ```powershell
@@ -38,7 +38,7 @@ npm start
 # UI: http://localhost:3010  (port 3010 avoids Inspection on 3000)
 ```
 
-The UI **always prompts for ORG** unless you pass `?Organization=â€¦`. After ORG is entered, local auth uses `.token`; on Vercel it uses OAuth env vars.
+The UI **always prompts for ORG** unless you pass `?Organization=…`. After ORG is entered, local auth uses `.token`; on Vercel it uses OAuth env vars.
 
 ### Vercel / cloud auth
 
@@ -53,7 +53,7 @@ Optional: `MANHATTAN_DEFAULT_ORG`, `MANHATTAN_USAGE_INGEST_URL`.
 | `Organization` | `org`, `organization` | `?Organization=SS-DEMO` |
 | `PO` | `po`, `PurchaseOrder`, `criteria` | `?PO=PO000002;PO000010` |
 | `Location` | `Facility`, `facility`, `location` | `?Location=SS-DEMO-DM1` |
-| `Theme` | â€” | `Theme=N` hides the theme picker |
+| `Theme` | — | `Theme=N` hides the theme picker |
 
 Multiple PO / criteria values: semicolons, commas, or spaces.
 
@@ -63,7 +63,7 @@ Multiple PO / criteria values: semicolons, commas, or spaces.
 2. Preload â†’ enter criteria â†’ **Load PO(s)**.
 3. Assign quantities on eligible lines â†’ **Create ASN** â†’ confirm facility / EDD.
 4. On **ASN Created**: **Create LPNs** or **Done** (refreshes PO list).
-5. LPN modal: per ASN line set **Qty to cartonize** and **Std iLPN qty** (uneven splits OK â€” residual LPN). Predicted LPN count shown live. After create, the API polls for iLPNs up to ~10s.
+5. LPN modal: per ASN line set **Qty to cartonize** and **Std iLPN qty** (uneven splits OK — residual LPN). Predicted LPN count shown live. After create, the API polls for iLPNs up to ~10s.
 6. Create calls receiving `lpn/create`, then finds iLPNs by `AsnId` and displays LPN numbers.
 
 ## API actions
@@ -105,13 +105,13 @@ Audit JSON under `runs/` (gitignored). CLI does not yet create LPNs (web UI only
 
 ```
 supplierenablement/
-â”œâ”€â”€ public/                 # Web UI (ASN + LPN modals)
-â”œâ”€â”€ api/index.py            # Flask / Vercel API
-â”œâ”€â”€ mawm_client.py          # MAWM HTTP helpers (incl. lpn/create, ilpn search)
-â”œâ”€â”€ se_service.py
-â”œâ”€â”€ run_supplierenablement.py
-â”œâ”€â”€ server.js               # :3010
-â””â”€â”€ â€¦
+├── public/                 # Web UI (ASN + LPN modals)
+├── api/index.py            # Flask / Vercel API
+├── mawm_client.py          # MAWM HTTP helpers (incl. lpn/create, ilpn search)
+├── se_service.py
+├── run_supplierenablement.py
+├── server.js               # :3010
+└── …
 ```
 
 MAWM reference for LPN create: `../mawm_api_library/lpn_create/`.
