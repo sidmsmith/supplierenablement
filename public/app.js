@@ -7,12 +7,17 @@
     preloadEntries: [],
     purchaseOrders: [],
     expanded: {},
+    asnsExpanded: {}, // purchaseOrderId -> show ASN list under PO lines
     staged: {}, // key: poId|lineId -> { line payload + assignQty }
     preview: null,
     lastAsn: null, // { asnId, facility, edd } after successful create
     lastLpns: [], // enriched iLPNs after create_lpns (for label PDF)
     lastExpectedLpnCount: 0,
     lpnLines: [],
+    lpnFocusPoId: "", // when opening LPN modal from a PO context
+    asnsByPo: {}, // purchaseOrderId -> asn summary[] (undefined = not loaded)
+    asnLoading: {}, // purchaseOrderId -> true while fetching
+    asnLoadError: {}, // purchaseOrderId -> error string
     sortKey: "purchaseOrderId",
     sortAsc: true,
     sheetPoIdx: -1,
@@ -295,6 +300,10 @@
       }
       state.purchaseOrders = data.purchaseOrders || [];
       state.expanded = {};
+      state.asnsExpanded = {};
+      state.asnsByPo = {};
+      state.asnLoading = {};
+      state.asnLoadError = {};
       // keep staged qty if still present/eligible, else clear
       pruneStaged();
       showResults();
@@ -578,6 +587,8 @@
       });
     });
 
+    bindAsnSectionControls(el.poBody);
+
     el.poBody.querySelectorAll("[data-qty-input]").forEach((input) => {
       input.addEventListener("click", (e) => e.stopPropagation());
       input.addEventListener("change", () => onQtyChange(input));
@@ -686,8 +697,10 @@
       <div class="sheet-kv"><span class="kv-label">Lines</span><span class="kv-value">${po.lineCount ?? (po.lines || []).length} total · ${po.eligibleLineCount ?? 0} eligible</span></div>
       <div class="sheet-kv"><span class="kv-label">Unshipped qty</span><span class="kv-value">${fmtQty(po.totalUnshippedQuantity)}</span></div>
     `;
-    el.sheetBody.innerHTML = renderSheetLines(po, hideShipped());
+    el.sheetBody.innerHTML =
+      renderSheetLines(po, hideShipped()) + renderAsnSection(po.purchaseOrderId, true);
     bindSheetLineControls(po.purchaseOrderId);
+    bindAsnSectionControls(el.sheetBody);
     el.sheetOverlay.classList.add("visible");
     el.bottomSheet.classList.add("visible");
     updateSheetNavArrows(rows.length);
@@ -939,13 +952,256 @@
     renderPoCards();
   }
 
+  function clearAsnCacheForPos(poIds) {
+    (poIds || []).forEach((id) => {
+      if (!id) return;
+      delete state.asnsByPo[id];
+      delete state.asnLoading[id];
+      delete state.asnLoadError[id];
+    });
+  }
+
+  function refreshOpenPoViews(poId) {
+    if (state.expanded[poId]) renderPoTable();
+    if (sheetIsOpen() && state.sheetPoIdx >= 0) {
+      const rows = sortedPos();
+      const po = rows[state.sheetPoIdx];
+      if (po && po.purchaseOrderId === poId && el.sheetBody) {
+        const prevScroll = el.sheetBody.scrollTop;
+        el.sheetBody.innerHTML =
+          renderSheetLines(po, hideShipped()) + renderAsnSection(po.purchaseOrderId, true);
+        bindSheetLineControls(po.purchaseOrderId);
+        bindAsnSectionControls(el.sheetBody);
+        el.sheetBody.scrollTop = prevScroll;
+        return;
+      }
+    }
+    renderPoCards();
+  }
+
+  async function ensureAsnsForPo(poId, force) {
+    if (!poId || !state.token) return;
+    if (!force && Object.prototype.hasOwnProperty.call(state.asnsByPo, poId)) return;
+    if (state.asnLoading[poId]) return;
+    state.asnLoading[poId] = true;
+    delete state.asnLoadError[poId];
+    refreshOpenPoViews(poId);
+    try {
+      const data = await api("list_asns_for_po", {
+        org: state.org,
+        token: state.token,
+        location: state.facility,
+        purchaseOrderId: poId,
+      });
+      if (!data.success) {
+        state.asnLoadError[poId] = data.error || "Could not load ASNs";
+        state.asnsByPo[poId] = [];
+      } else {
+        state.asnsByPo[poId] = data.asns || [];
+        delete state.asnLoadError[poId];
+      }
+    } catch (e) {
+      state.asnLoadError[poId] = e.message || String(e);
+      state.asnsByPo[poId] = [];
+    } finally {
+      delete state.asnLoading[poId];
+      refreshOpenPoViews(poId);
+    }
+  }
+
+  function fmtAsnEdd(raw) {
+    if (raw == null || raw === "") return "—";
+    const s = String(raw).trim();
+    if (!s) return "—";
+    // Prefer yyyy-MM-dd from ISO / date strings
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const mo = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${mo}-${day}`;
+    }
+    return s;
+  }
+
+  function renderAsnSection(poId, mobile) {
+    const open = !!state.asnsExpanded[poId];
+    const chevron = `<span class="chevron asn-toggle-chevron ${open ? "open" : ""}">▶</span>`;
+    const toggle = `<button type="button" class="asn-section-toggle" data-asn-toggle="${escapeHtml(poId)}">
+      ${chevron}
+      <span class="asn-section-title">ASNs for this PO</span>
+    </button>`;
+    if (!open) {
+      return `<div class="asn-section" data-asn-section="${escapeHtml(poId)}">${toggle}</div>`;
+    }
+
+    const loading = !!state.asnLoading[poId];
+    const err = state.asnLoadError[poId];
+    const loaded = Object.prototype.hasOwnProperty.call(state.asnsByPo, poId);
+    const asns = state.asnsByPo[poId] || [];
+    let body = "";
+    if (loading && !loaded) {
+      body = `<div class="asn-loading">Loading ASNs…</div>`;
+    } else if (err) {
+      body = `<div class="asn-error">${escapeHtml(err)}
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-asn-refresh="${escapeHtml(poId)}">Retry</button>
+      </div>`;
+    } else if (loaded && !asns.length) {
+      body = `<div class="asn-empty">No ASNs for this PO yet.</div>`;
+    } else if (loaded) {
+      body = asns
+        .map((asn) => (mobile ? renderAsnSheetBlock(asn, poId) : renderAsnDesktopBlock(asn, poId)))
+        .join("");
+      if (loading) body += `<div class="asn-loading mt-1">Refreshing…</div>`;
+    } else {
+      body = `<div class="asn-loading">Loading ASNs…</div>`;
+    }
+    return `<div class="asn-section" data-asn-section="${escapeHtml(poId)}">
+      ${toggle}
+      <div class="asn-section-body">${body}</div>
+    </div>`;
+  }
+
+  function renderAsnLineRows(asn, poId) {
+    return (asn.lines || [])
+      .map((line) => {
+        const linked = !!line.linkedToPo || line.purchaseOrderId === poId;
+        const chip = line.purchaseOrderId
+          ? `<span class="po-chip">${escapeHtml(line.purchaseOrderId)}</span>`
+          : "";
+        return `<tr class="${linked ? "asn-line-linked" : "asn-line-other"}">
+          <td>${chip}</td>
+          <td>${escapeHtml(line.purchaseOrderLineId || "")}</td>
+          <td class="col-item"><span class="item-cell"><span>${escapeHtml(line.itemId || "")}</span>${renderItemImage(line.itemImageUrl)}</span></td>
+          <td title="${escapeHtml(line.description || "")}">${escapeHtml(line.description || "")}</td>
+          <td>${fmtQty(line.shippedQuantity)} ${escapeHtml(line.quantityUomId || "")}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  function renderAsnActions(asn, poId) {
+    const hasLpns = (asn.existingLpnCount || 0) > 0;
+    const labelsBtn = hasLpns
+      ? `<button type="button" class="btn btn-sm btn-outline-primary" data-asn-labels
+          data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
+          data-focus-po="${escapeHtml(poId)}">Download Labels</button>`
+      : "";
+    return `<div class="asn-block-actions">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-create-lpns
+        data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
+        data-focus-po="${escapeHtml(poId)}">Create LPNs</button>
+      ${labelsBtn}
+    </div>`;
+  }
+
+  function renderAsnDesktopBlock(asn, poId) {
+    const lines = renderAsnLineRows(asn, poId);
+    return `<div class="asn-block" data-asn-id="${escapeHtml(asn.asnId)}">
+      <div class="asn-block-head">
+        <div>
+          <div class="asn-block-id-row">
+            <span class="asn-block-id">${escapeHtml(asn.asnId)}</span>
+            <span class="asn-status-chip">${escapeHtml(asn.statusLabel || asn.asnStatus || "—")}</span>
+          </div>
+          <div class="asn-block-meta">
+            <span>${escapeHtml(asn.facilityId || "")}</span>
+            ${asn.vendorId ? `<span>Vendor ${escapeHtml(asn.vendorId)}</span>` : ""}
+            <span>Estimated Delivery Date: ${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}</span>
+            <span>${fmtLpnCount(asn.existingLpnCount || 0)}</span>
+          </div>
+        </div>
+        ${renderAsnActions(asn, poId)}
+      </div>
+      ${
+        lines
+          ? `<table class="asn-lines-table">
+              <thead><tr><th>PO</th><th>Line</th><th>Item</th><th>Description</th><th>Qty</th></tr></thead>
+              <tbody>${lines}</tbody>
+            </table>`
+          : `<div class="asn-empty" style="padding:0.5rem 0.75rem;">No AsnLine detail</div>`
+      }
+    </div>`;
+  }
+
+  function renderAsnSheetBlock(asn, poId) {
+    const lineCards = (asn.lines || [])
+      .map((line) => {
+        const linked = !!line.linkedToPo || line.purchaseOrderId === poId;
+        return `<div class="asn-sheet-line ${linked ? "asn-line-linked" : "asn-line-other"}">
+          <span class="po-chip">${escapeHtml(line.purchaseOrderId || "—")}</span>
+          <strong>${escapeHtml(line.itemId || "")}</strong>
+          <span>${fmtQty(line.shippedQuantity)} ${escapeHtml(line.quantityUomId || "")}</span>
+          <span style="color:var(--text-muted)">${escapeHtml(line.description || "")}</span>
+        </div>`;
+      })
+      .join("");
+    return `<div class="asn-sheet-card" data-asn-id="${escapeHtml(asn.asnId)}">
+      <div class="asn-block-head" style="background:transparent;border:0;padding:0 0 0.45rem;">
+        <div>
+          <div class="asn-block-id-row">
+            <span class="asn-block-id">${escapeHtml(asn.asnId)}</span>
+            <span class="asn-status-chip">${escapeHtml(asn.statusLabel || asn.asnStatus || "—")}</span>
+          </div>
+          <div class="asn-block-meta">
+            <span>Estimated Delivery Date: ${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}</span>
+            <span>${fmtLpnCount(asn.existingLpnCount || 0)}</span>
+          </div>
+        </div>
+        ${renderAsnActions(asn, poId)}
+      </div>
+      ${lineCards || `<div class="asn-empty">No AsnLine detail</div>`}
+    </div>`;
+  }
+
+  function bindAsnSectionControls(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-asn-toggle]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const poId = btn.getAttribute("data-asn-toggle");
+        state.asnsExpanded[poId] = !state.asnsExpanded[poId];
+        if (state.asnsExpanded[poId]) ensureAsnsForPo(poId);
+        refreshOpenPoViews(poId);
+      });
+    });
+    root.querySelectorAll("[data-asn-refresh]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        ensureAsnsForPo(btn.getAttribute("data-asn-refresh"), true);
+      });
+    });
+    root.querySelectorAll("[data-asn-create-lpns]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCreateLpnsForAsn(
+          btn.getAttribute("data-asn-id"),
+          btn.getAttribute("data-facility"),
+          btn.getAttribute("data-focus-po")
+        );
+      });
+    });
+    root.querySelectorAll("[data-asn-labels]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        downloadLpnLabelsForAsn(
+          btn.getAttribute("data-asn-id"),
+          btn.getAttribute("data-facility")
+        );
+      });
+    });
+  }
+
   function renderLinesPanel(po, hideShippedLines) {
     let lines = po.lines || [];
     if (hideShippedLines) {
       lines = lines.filter((l) => !l.fullyShipped);
     }
+    const asnHtml = renderAsnSection(po.purchaseOrderId, false);
     if (!lines.length) {
-      return `<div style="color:var(--text-muted)">No lines to show</div>`;
+      return `<div style="color:var(--text-muted)">No lines to show</div>${asnHtml}`;
     }
     const headerAction = headerAssignAction(po, hideShippedLines);
     const rows = lines
@@ -1011,7 +1267,7 @@
         <th class="col-elig"></th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
+    </table>${asnHtml}`;
   }
 
   function findLine(poId, lineId) {
@@ -1184,6 +1440,9 @@
         ${steps ? `<table class="summary-table"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ""}
       `;
       if (ok) {
+        const touchedPos = [
+          ...new Set(stagedList().map((s) => s.purchaseOrderId).filter(Boolean)),
+        ];
         state.staged = {};
         state.preview = null;
         state.lastAsn = {
@@ -1193,10 +1452,15 @@
         };
         state.lastLpns = [];
         state.lastExpectedLpnCount = 0;
+        state.lpnFocusPoId = "";
+        clearAsnCacheForPos(touchedPos);
         updateStageUi();
         renderPoCards();
         if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
         if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+        touchedPos.forEach((id) => {
+          if (state.asnsExpanded[id]) ensureAsnsForPo(id, true);
+        });
       } else {
         if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
         if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
@@ -1300,13 +1564,21 @@
     if (!lines.length) {
       return `<p style="color:var(--text-muted)">No ASN lines with available quantity for LPN creation.</p>`;
     }
+    const focusPo = state.lpnFocusPoId || "";
     const mobile = window.matchMedia("(max-width: 992px)").matches;
     if (mobile) {
       const cards = lines
         .map((line, idx) => {
-          return `<div class="lpn-mobile-card">
+          const focus =
+            focusPo && line.purchaseOrderId === focusPo ? " lpn-line-focus" : "";
+          return `<div class="lpn-mobile-card${focus}">
             <div class="sheet-line-item">${escapeHtml(line.itemId)} ${renderItemImage(line.itemImageUrl)}</div>
             <div class="sheet-line-desc">${escapeHtml(line.description || "")}</div>
+            ${
+              line.purchaseOrderId
+                ? `<div style="font-size:0.75rem;margin:0.25rem 0;"><span class="po-chip">${escapeHtml(line.purchaseOrderId)}</span></div>`
+                : ""
+            }
             <div class="sheet-line-qtys" style="grid-template-columns:1fr 1fr;">
               <div>Available<strong>${fmtQty(line.availableQtyForLpnCreation)}</strong></div>
               <div>Shipped<strong>${fmtQty(line.shippedQuantity)}</strong></div>
@@ -1329,7 +1601,7 @@
         .join("");
       return `
         <p class="mb-2" style="color:var(--text-secondary)">
-          ASN <strong>${escapeHtml(asnId)}</strong> · set cartonize and standard iLPN quantity per line.
+          ASN <strong>${escapeHtml(asnId)}</strong> · all ASN lines · set cartonize and standard iLPN quantity.
         </p>
         <div class="lpn-mobile-cards" style="display:block">${cards}</div>
         <p class="mb-0 mt-2 lpn-total" data-lpn-total></p>
@@ -1337,8 +1609,12 @@
     }
     const rows = lines
       .map((line, idx) => {
-        return `<tr>
-          <td class="lpn-col-item col-item"><span class="item-cell"><span>${escapeHtml(line.itemId)}</span>${renderItemImage(line.itemImageUrl)}</span></td>
+        const focus =
+          focusPo && line.purchaseOrderId === focusPo ? " lpn-line-focus" : "";
+        return `<tr class="${focus.trim()}">
+          <td class="lpn-col-item col-item"><span class="item-cell"><span>${escapeHtml(line.itemId)}</span>${renderItemImage(line.itemImageUrl)}</span>
+            ${line.purchaseOrderId ? `<div class="mt-1"><span class="po-chip">${escapeHtml(line.purchaseOrderId)}</span></div>` : ""}
+          </td>
           <td class="lpn-col-desc" title="${escapeHtml(line.description || "")}">${escapeHtml(line.description || "")}</td>
           <td class="lpn-col-qty">${fmtQty(line.availableQtyForLpnCreation)}</td>
           <td class="lpn-col-qty">${fmtQty(line.shippedQuantity)}</td>
@@ -1352,7 +1628,7 @@
       .join("");
     return `
       <p class="mb-2" style="color:var(--text-secondary)">
-        ASN <strong>${escapeHtml(asnId)}</strong> · set cartonize and standard iLPN quantity per line.
+        ASN <strong>${escapeHtml(asnId)}</strong> · all ASN lines · set cartonize and standard iLPN quantity.
       </p>
       <div style="overflow-x:auto;">
         <table class="lpn-table">
@@ -1372,8 +1648,14 @@
     `;
   }
 
-  async function openCreateLpnsFromResults() {
-    if (!state.lastAsn || !state.lastAsn.asnId) return;
+  async function openCreateLpnsForAsn(asnId, facility, focusPoId) {
+    if (!asnId) return;
+    state.lastAsn = {
+      asnId,
+      facility: facility || (state.lastAsn && state.lastAsn.facility) || state.facility,
+      edd: (state.lastAsn && state.lastAsn.edd) || "",
+    };
+    state.lpnFocusPoId = focusPoId || "";
     closeModal(el.resultsModal);
     setBusy(true, "Loading ASN lines…");
     try {
@@ -1385,7 +1667,6 @@
       });
       if (!data.success) {
         alert(data.error || "Could not load ASN for LPN creation");
-        openModal(el.resultsModal);
         return;
       }
       state.lpnLines = data.lines || [];
@@ -1403,10 +1684,26 @@
       openModal(el.lpnModal);
     } catch (e) {
       alert(e.message || String(e));
-      openModal(el.resultsModal);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openCreateLpnsFromResults() {
+    if (!state.lastAsn || !state.lastAsn.asnId) return;
+    return openCreateLpnsForAsn(state.lastAsn.asnId, state.lastAsn.facility, "");
+  }
+
+  async function downloadLpnLabelsForAsn(asnId, facility) {
+    if (!asnId) return;
+    state.lastAsn = {
+      asnId,
+      facility: facility || (state.lastAsn && state.lastAsn.facility) || state.facility,
+      edd: (state.lastAsn && state.lastAsn.edd) || "",
+    };
+    state.lastLpns = [];
+    state.lastExpectedLpnCount = 0;
+    return downloadLpnLabels();
   }
 
   async function confirmCreateLpns() {
@@ -1447,6 +1744,10 @@
         state.lastExpectedLpnCount = data.expectedLpnCount || (data.lpns || []).length;
         if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "";
         if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+        if (state.lpnFocusPoId) {
+          clearAsnCacheForPos([state.lpnFocusPoId]);
+          ensureAsnsForPo(state.lpnFocusPoId, true);
+        }
       } else {
         state.lastLpns = [];
         state.lastExpectedLpnCount = data.expectedLpnCount || 0;

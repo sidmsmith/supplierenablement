@@ -44,6 +44,16 @@ PO_STATUS_LABELS = {
     "10000": "Closed",
 }
 
+# AsnStatus — mawm_api_library/_conventions/statuses.md#asn
+ASN_STATUS_LABELS = {
+    "0000": "Planning",
+    "0500": "Open",
+    "1000": "In Transit",
+    "3000": "In Receiving",
+    "8000": "Verified",
+    "9000": "Canceled",
+}
+
 
 def _get(url: str, **kwargs) -> requests.Response:
     kwargs.setdefault("timeout", REQUEST_TIMEOUT)
@@ -209,6 +219,14 @@ def po_status_description(status_id) -> str:
         return ""
     key = str(status_id).strip()
     return PO_STATUS_LABELS.get(key) or key
+
+
+def asn_status_description(status_id) -> str:
+    """Human ASN status only, e.g. 'In Transit'."""
+    if status_id in (None, ""):
+        return ""
+    key = str(status_id).strip()
+    return ASN_STATUS_LABELS.get(key) or key
 
 
 def _extract_nextup_number(body) -> Optional[str]:
@@ -475,6 +493,38 @@ def search_asn(asn_id: str, token: str, org: str, location: str = None) -> Optio
         )
     data = _response_data_list(response.json())
     return data[0] if data else None
+
+
+def search_asns_by_purchase_order(
+    purchase_order_id: str,
+    token: str,
+    org: str,
+    location: str = None,
+    size: int = 50,
+) -> List[dict]:
+    """ASNs that have at least one AsnLine for the PO (full AsnLine[] still returned).
+
+    Nested Query path required — header PurchaseOrderId on ASN search returns 400.
+    """
+    po_id = str(purchase_order_id or "").strip()
+    if not po_id:
+        return []
+    token = normalize_token(token)
+    payload = {
+        "Query": f"AsnLine.PurchaseOrderId ='{po_id}'",
+        "Size": max(1, min(int(size or 50), 200)),
+        "Page": 0,
+    }
+    response = _post(
+        ASN_SEARCH_URL,
+        headers=build_receiving_headers(token, org, location=location),
+        json=payload,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"ASN search by PO failed: {response.status_code} {response.text[:500]}"
+        )
+    return _response_data_list(response.json())
 
 
 def create_lpns(

@@ -1,4 +1,4 @@
-# api/index.py
+﻿# api/index.py
 import os
 import sys
 from pathlib import Path
@@ -17,6 +17,7 @@ from se_service import (  # noqa: E402
     build_labels_pdf_for_asn,
     create_asn_from_staged,
     create_lpns_and_list,
+    list_asns_for_po,
     load_asn_lines_for_lpn_creation,
     load_pos_detail,
     match_preload_entries,
@@ -30,7 +31,7 @@ PASSWORD = os.getenv("MANHATTAN_PASSWORD")
 CLIENT_SECRET = os.getenv("MANHATTAN_SECRET")
 USAGE_INGEST_URL = os.getenv("MANHATTAN_USAGE_INGEST_URL", "").strip()
 APP_NAME = "supplierenablement-app"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 DEFAULT_ORG = os.getenv("MANHATTAN_DEFAULT_ORG", "SS-DEMO").strip().upper() or "SS-DEMO"
 TOKEN_FILE = ROOT / ".token"
 
@@ -256,6 +257,27 @@ def create_asn():
         return jsonify(result)
     except Exception as e:
         print(f"[CREATE_ASN] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/list_asns_for_po", methods=["POST"])
+def list_asns_for_po_route():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    po_id = (
+        data.get("purchaseOrderId")
+        or data.get("purchase_order_id")
+        or data.get("poId")
+        or ""
+    ).strip()
+    try:
+        result = list_asns_for_po(token, org, po_id, location=location)
+        return jsonify(result)
+    except Exception as e:
+        print(f"[LIST_ASNS_FOR_PO] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -26,7 +26,9 @@ from mawm_client import (
     remaining_qty,
     render_zpl_labels_pdf,
     resolve_location,
+    asn_status_description,
     search_asn,
+    search_asns_by_purchase_order,
     search_ilpns_by_asn,
     search_items,
     search_purchase_order_lines,
@@ -448,6 +450,102 @@ def _asn_line_id(line: dict) -> str:
         if val is not None and str(val).strip():
             return str(val).strip()
     return ""
+
+
+def list_asns_for_po(
+    token: str,
+    org: str,
+    purchase_order_id: str,
+    location: str = None,
+) -> Dict[str, Any]:
+    """Return ASNs linked to a PO via AsnLine.PurchaseOrderId (full line lists)."""
+    po_id = str(purchase_order_id or "").strip()
+    if not po_id:
+        return {"success": False, "error": "PurchaseOrderId required"}
+    dest = resolve_location(org, location)
+    raw = search_asns_by_purchase_order(po_id, token, org, location=dest, size=50)
+
+    item_ids: List[str] = []
+    for asn in raw:
+        for line in asn.get("AsnLine") or []:
+            iid = str(line.get("ItemId") or "").strip()
+            if iid:
+                item_ids.append(iid)
+    items = search_items(item_ids, token, org, location=dest) if item_ids else {}
+
+    asns: List[dict] = []
+    for asn in raw:
+        asn_id = str(asn.get("AsnId") or "").strip()
+        if not asn_id:
+            continue
+        lines_out: List[dict] = []
+        linked = 0
+        other = 0
+        for line in asn.get("AsnLine") or []:
+            line_po = str(line.get("PurchaseOrderId") or "").strip()
+            item_id = str(line.get("ItemId") or "").strip()
+            item = items.get(item_id) or {}
+            linked_to_po = line_po == po_id
+            if linked_to_po:
+                linked += 1
+            else:
+                other += 1
+            lines_out.append(
+                {
+                    "asnLineId": _asn_line_id(line),
+                    "itemId": item_id,
+                    "description": item.get("Description")
+                    or item.get("ItemDescription")
+                    or line.get("Description")
+                    or "",
+                    "itemImageUrl": item.get("ImageUrl")
+                    or item.get("imageUrl")
+                    or item.get("ImageURL")
+                    or "",
+                    "shippedQuantity": _num(line.get("ShippedQuantity")),
+                    "quantityUomId": line.get("QuantityUomId") or "UNIT",
+                    "purchaseOrderId": line_po,
+                    "purchaseOrderLineId": str(
+                        line.get("PurchaseOrderLineId") or ""
+                    ).strip(),
+                    "linkedToPo": linked_to_po,
+                }
+            )
+        lpn_ids = []
+        for lpn in asn.get("Lpn") or []:
+            lid = lpn.get("LpnId") or lpn.get("IlpnId")
+            if lid:
+                lpn_ids.append(str(lid))
+        status_code = str(asn.get("AsnStatus") or "").strip()
+        edd_raw = asn.get("EstimatedDeliveryDate") or asn.get("estimatedDeliveryDate")
+        asns.append(
+            {
+                "asnId": asn_id,
+                "asnStatus": status_code,
+                "statusLabel": asn_status_description(status_code),
+                "estimatedDeliveryDate": edd_raw,
+                "facilityId": asn.get("FacilityId")
+                or asn.get("DestinationFacilityId")
+                or dest,
+                "vendorId": asn.get("VendorId") or "",
+                "asnLevelId": asn.get("AsnLevelId") or "",
+                "lineCount": len(lines_out),
+                "linkedLineCount": linked,
+                "otherPoLineCount": other,
+                "existingLpnCount": len(lpn_ids),
+                "existingLpnIds": lpn_ids,
+                "lines": lines_out,
+            }
+        )
+
+    asns.sort(key=lambda a: a.get("asnId") or "", reverse=True)
+    return {
+        "success": True,
+        "purchaseOrderId": po_id,
+        "facility": dest,
+        "asnCount": len(asns),
+        "asns": asns,
+    }
 
 
 def _asn_line_available_qty(line: dict) -> Decimal:

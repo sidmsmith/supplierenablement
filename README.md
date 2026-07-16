@@ -1,4 +1,4 @@
-# Supplier Enablement v0.2.0
+﻿# Supplier Enablement v0.2.1
 
 CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs** against the MAWM demo environment (`salep.sce.manh.com`).
 
@@ -6,16 +6,17 @@ CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs
 |---|---|
 | **Repo** | [github.com/sidmsmith/supplierenablement](https://github.com/sidmsmith/supplierenablement) |
 | **Live** | [supplierenablement.vercel.app](https://supplierenablement.vercel.app/) |
-| **Version** | `0.2.0` (browser tab title only) |
+| **Version** | `0.2.1` (browser tab title only) |
 
 ## Features
 
 - Authenticate by ORG (local `.token` or Vercel OAuth env)
-- Light preload index → find POs by **PO number, Vendor, Item, or Description** (multi-token with space / `,` / `;`)
+- Light preload index â†’ find POs by **PO number, Vendor, Item, or Description** (multi-token with space / `,` / `;`)
 - Desktop: expandable PO table with column config, sort, assign qty / **All** / **Clear**
-- Mobile (≤992px): PO cards + bottom sheet with editable lines, **Show/Hide** shipped lines
+- Mobile (â‰¤992px): PO cards + bottom sheet with editable lines, **Show/Hide** shipped lines
 - One ASN for all assigned lines; confirm facility + EDD
-- After ASN create: **Create LPNs** modal (cartonize + standard iLPN qty) → `lpn/create` → list iLPN numbers by AsnId
+- After ASN create: **Create LPNs** modal (cartonize + standard iLPN qty) â†’ `lpn/create` â†’ list iLPN numbers by AsnId
+- Expand a PO to see **linked ASNs** (multi-PO ASNs show all lines; other-PO lines muted) with Create LPNs / Download Labels
 - URL deep-link params for Organization, PO, Location, Theme
 
 ## Setup
@@ -28,7 +29,7 @@ npm install
 
 ### Local web
 
-1. Put a Bearer access token in `.token` at the project root (**gitignored — never commit**).
+1. Put a Bearer access token in `.token` at the project root (**gitignored â€” never commit**).
 2. Start API and UI in two terminals:
 
 ```powershell
@@ -37,7 +38,7 @@ npm start
 # UI: http://localhost:3010  (port 3010 avoids Inspection on 3000)
 ```
 
-The UI **always prompts for ORG** unless you pass `?Organization=…`. After ORG is entered, local auth uses `.token`; on Vercel it uses OAuth env vars.
+The UI **always prompts for ORG** unless you pass `?Organization=â€¦`. After ORG is entered, local auth uses `.token`; on Vercel it uses OAuth env vars.
 
 ### Vercel / cloud auth
 
@@ -52,17 +53,17 @@ Optional: `MANHATTAN_DEFAULT_ORG`, `MANHATTAN_USAGE_INGEST_URL`.
 | `Organization` | `org`, `organization` | `?Organization=SS-DEMO` |
 | `PO` | `po`, `PurchaseOrder`, `criteria` | `?PO=PO000002;PO000010` |
 | `Location` | `Facility`, `facility`, `location` | `?Location=SS-DEMO-DM1` |
-| `Theme` | — | `Theme=N` hides the theme picker |
+| `Theme` | â€” | `Theme=N` hides the theme picker |
 
 Multiple PO / criteria values: semicolons, commas, or spaces.
 
 ## Web UI flow
 
-1. Enter **ORG** → Authenticate (skipped only when `Organization` is in the URL).
-2. Preload → enter criteria → **Load PO(s)**.
-3. Assign quantities on eligible lines → **Create ASN** → confirm facility / EDD.
+1. Enter **ORG** â†’ Authenticate (skipped only when `Organization` is in the URL).
+2. Preload â†’ enter criteria â†’ **Load PO(s)**.
+3. Assign quantities on eligible lines â†’ **Create ASN** â†’ confirm facility / EDD.
 4. On **ASN Created**: **Create LPNs** or **Done** (refreshes PO list).
-5. LPN modal: per ASN line set **Qty to cartonize** and **Std iLPN qty** (uneven splits OK — residual LPN). Predicted LPN count shown live. After create, the API polls for iLPNs up to ~10s.
+5. LPN modal: per ASN line set **Qty to cartonize** and **Std iLPN qty** (uneven splits OK â€” residual LPN). Predicted LPN count shown live. After create, the API polls for iLPNs up to ~10s.
 6. Create calls receiving `lpn/create`, then finds iLPNs by `AsnId` and displays LPN numbers.
 
 ## API actions
@@ -74,7 +75,8 @@ Multiple PO / criteria values: semicolons, commas, or spaces.
 | `load_pos` | Full PO + line details |
 | `preview_asn` | Reserve next ASN number + summary |
 | `create_asn` | Shell `asn/save` + `asn/bulkImport` |
-| `load_asn_for_lpn` | ASN search → lines with AsnLineId for LPN modal |
+| `list_asns_for_po` | ASNs linked to a PO (`AsnLine.PurchaseOrderId`) |
+| `load_asn_for_lpn` | ASN search â†’ lines with AsnLineId for LPN modal |
 | `create_lpns` | `receiving/ui/lpn/create` + iLPN search by AsnId |
 | `download_lpn_labels` | Build ZPL labels + Labelary PDF (`{AsnId}-labels.pdf`) |
 | `app_opened` | Optional usage ping |
@@ -103,13 +105,13 @@ Audit JSON under `runs/` (gitignored). CLI does not yet create LPNs (web UI only
 
 ```
 supplierenablement/
-├── public/                 # Web UI (ASN + LPN modals)
-├── api/index.py            # Flask / Vercel API
-├── mawm_client.py          # MAWM HTTP helpers (incl. lpn/create, ilpn search)
-├── se_service.py
-├── run_supplierenablement.py
-├── server.js               # :3010
-└── …
+â”œâ”€â”€ public/                 # Web UI (ASN + LPN modals)
+â”œâ”€â”€ api/index.py            # Flask / Vercel API
+â”œâ”€â”€ mawm_client.py          # MAWM HTTP helpers (incl. lpn/create, ilpn search)
+â”œâ”€â”€ se_service.py
+â”œâ”€â”€ run_supplierenablement.py
+â”œâ”€â”€ server.js               # :3010
+â””â”€â”€ â€¦
 ```
 
 MAWM reference for LPN create: `../mawm_api_library/lpn_create/`.

@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Supplier Enablement v0.2.0</title>
+  <title>Supplier Enablement v0.2.1</title>
   <!-- v0.2.0: Create ASN from PO + Create LPNs -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet" />
@@ -240,6 +240,148 @@
       padding: 0;
     }
     .lines-panel { padding: 0.75rem 1rem 1rem; }
+    .asn-section {
+      margin-top: 1rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+    .asn-section-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 0;
+      background: transparent;
+      padding: 0.15rem 0;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .asn-section-toggle:hover .asn-section-title {
+      color: var(--primary);
+    }
+    .asn-section-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+    .asn-section-body { margin-top: 0.65rem; }
+    .asn-block-id-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+    .asn-status-chip {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #fff;
+      white-space: nowrap;
+    }
+    .asn-block {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.65rem;
+      overflow: hidden;
+    }
+    .asn-block-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      background: var(--input-bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .asn-block-id { font-weight: 700; font-size: 0.95rem; }
+    .asn-block-meta {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+    }
+    .asn-block-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .asn-lines-table {
+      width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    .asn-lines-table th {
+      background: transparent;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 0.35rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    .asn-lines-table td {
+      padding: 0.4rem 0.65rem;
+      border-top: 1px solid var(--border);
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .asn-line-other {
+      opacity: 0.48;
+      color: var(--text-muted);
+    }
+    .asn-line-other .po-chip {
+      opacity: 1;
+    }
+    .po-chip {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .asn-line-linked .po-chip {
+      border-color: var(--accent, #0d6efd);
+      color: var(--text);
+    }
+    .asn-empty, .asn-loading, .asn-error {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      padding: 0.25rem 0;
+    }
+    .asn-error { color: #c0392b; }
+    .asn-sheet-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem;
+      margin-bottom: 0.55rem;
+      background: var(--card-bg);
+    }
+    .asn-sheet-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.75rem;
+      align-items: baseline;
+      padding: 0.35rem 0;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+    .asn-sheet-line:first-of-type { border-top: none; }
+    .lpn-table tr.lpn-line-focus td {
+      background: rgba(13, 110, 253, 0.06);
+    }
+    .lpn-mobile-card.lpn-line-focus {
+      outline: 1px solid rgba(13, 110, 253, 0.35);
+    }
     table.lines-table {
       width: 100%;
       table-layout: fixed;
@@ -956,7 +1098,7 @@
     </div>
   </div>
 
-  <div class="busy-overlay" id="busyOverlay">Working…</div>
+  <div class="busy-overlay" id="busyOverlay">Workingâ€¦</div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/themes.js"></script>
