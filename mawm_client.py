@@ -645,8 +645,9 @@ def schedule_appointment(
     equipment_type_id: str = "48FT",
     duration: int = 60,
     appointment_status_id: str = "3000",
+    asn_id: str = None,
 ) -> dict:
-    """POST scheduleAppointment (schedule_app payload parity)."""
+    """POST scheduleAppointment; optionally attach ASN (ContentType ASNs)."""
     preferred = str(preferred_date_time or "").strip()
     if not preferred:
         raise ValueError("PreferredDateTime required")
@@ -658,6 +659,11 @@ def schedule_appointment(
         "Duration": int(duration or 60),
         "AppointmentStatusId": appointment_status_id,
     }
+    asn = str(asn_id or "").strip()
+    if asn:
+        payload["ContentType"] = "ASNs"
+        payload["AppointmentContents"] = [{"Asn": asn}]
+        payload["Asn"] = [{"AsnId": asn, "DestinationFacilityId": dest}]
     response = _post(
         APPOINTMENT_SCHEDULE_URL,
         headers=build_receiving_headers(token, org, location=dest),
@@ -673,7 +679,9 @@ def schedule_appointment(
         )
     if isinstance(body, dict) and body.get("success") is False:
         raise RuntimeError(body.get("error") or body.get("message") or "scheduleAppointment failed")
-    return body if isinstance(body, dict) else {"data": body}
+    if isinstance(body, dict):
+        body["_requestPayload"] = payload
+    return body if isinstance(body, dict) else {"data": body, "_requestPayload": payload}
 
 
 def render_zpl_labels_pdf(zpl: str, width_in: float = 4.0, height_in: float = 6.0) -> bytes:

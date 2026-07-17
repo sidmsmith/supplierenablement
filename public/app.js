@@ -1879,7 +1879,7 @@
         <p><strong>Appointment:</strong> ${escapeHtml(data.appointmentId || "—")}</p>
         <p><strong>Time:</strong> ${escapeHtml(data.preferredDateTime || slot.preferredDateTime)}</p>
         <p><strong>ASN:</strong> ${escapeHtml(ctx.asnId || "")}
-          <span style="color:var(--text-muted)">(not attached in v1)</span></p>
+          ${data.asnAttached ? "" : '<span style="color:var(--text-muted)">(not attached)</span>'}</p>
         <p><strong>Facility:</strong> ${escapeHtml(data.facility || ctx.facility || "")}</p>
       `;
       if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";

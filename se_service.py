@@ -1340,17 +1340,18 @@ def book_appointment_slot(
     location: str = None,
     asn_id: str = None,
 ) -> Dict[str, Any]:
-    """Schedule appointment using schedule_app defaults (ASN not attached in v1)."""
+    """Schedule appointment; attach ASN when asn_id is provided."""
     preferred = str(preferred_date_time or "").strip()
     if not preferred:
         return {"success": False, "error": "preferredDateTime required"}
     dest = resolve_location(org, location)
+    asn = str(asn_id or "").strip()
     try:
         body = schedule_appointment(
-            token, org, preferred, location=dest
+            token, org, preferred, location=dest, asn_id=asn or None
         )
     except Exception as exc:
-        return {"success": False, "error": str(exc), "facility": dest}
+        return {"success": False, "error": str(exc), "facility": dest, "asnId": asn or None}
 
     data = body.get("data") if isinstance(body, dict) else None
     appointment = None
@@ -1371,16 +1372,21 @@ def book_appointment_slot(
     if not appointment_id and isinstance(body, dict):
         appointment_id = str(body.get("AppointmentId") or "").strip()
 
+    msg = (
+        f"Appointment {appointment_id} scheduled"
+        if appointment_id
+        else "Appointment scheduled"
+    )
+    if asn:
+        msg = f"{msg} for ASN {asn}"
+
     return {
         "success": True,
         "appointmentId": appointment_id or None,
         "preferredDateTime": preferred,
         "facility": dest,
-        "asnId": (asn_id or "").strip() or None,
-        "message": (
-            f"Appointment {appointment_id} scheduled"
-            if appointment_id
-            else "Appointment scheduled"
-        ),
-        "raw": body,
+        "asnId": asn or None,
+        "asnAttached": bool(asn),
+        "message": msg,
+        "raw": {k: v for k, v in (body or {}).items() if k != "_requestPayload"},
     }
