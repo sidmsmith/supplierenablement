@@ -1994,6 +1994,11 @@
     return { year, month: month + 1 };
   }
 
+  function prevApptMonth(year, month) {
+    if (month <= 1) return { year: year - 1, month: 12 };
+    return { year, month: month - 1 };
+  }
+
   // === EXPERIMENTAL: calendar day heatmap — remove this block + CSS if unwanted ===
   function refreshApptCalendarPane() {
     if (!el.apptBody) return;
@@ -2074,9 +2079,11 @@
     const year = state.apptMonth.getFullYear();
     const month = state.apptMonth.getMonth() + 1;
     await fetchApptDayColorsMonth(year, month, { applyUi: true });
-    // Prefetch the following month so the next-arrow feels instant.
+    // Prefetch adjacent months so either arrow feels instant.
     const next = nextApptMonth(year, month);
+    const prev = prevApptMonth(year, month);
     fetchApptDayColorsMonth(next.year, next.month, { applyUi: false });
+    fetchApptDayColorsMonth(prev.year, prev.month, { applyUi: false });
   }
   // === END EXPERIMENTAL: calendar day heatmap ===
 
