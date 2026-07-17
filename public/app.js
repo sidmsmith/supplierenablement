@@ -23,6 +23,7 @@
     apptSelectedDate: "", // YYYY-MM-DD
     apptSlots: [],
     apptSelectedSlot: null,
+    apptSlotsReqId: 0,
     apptTypeId: "DROP_UNLOAD",
     apptEquipmentId: "48FT",
     apptEquipmentTypes: null, // null = not loaded; [] or [{id,description}]
@@ -1809,6 +1810,35 @@
       </div>`;
   }
 
+  function renderApptSlotsLoading(iso) {
+    return `<div class="appt-slots-head">Times for ${escapeHtml(iso || "")}</div>
+      <div class="appt-slots-loading">Loading times…</div>`;
+  }
+
+  function syncApptCalendarSelection(iso) {
+    if (!el.apptBody) return;
+    el.apptBody.querySelectorAll("[data-appt-date]").forEach((btn) => {
+      btn.classList.toggle("selected", btn.getAttribute("data-appt-date") === iso);
+    });
+  }
+
+  function bindApptSlotsPane() {
+    if (!el.apptBody) return;
+    el.apptBody.querySelectorAll("[data-appt-slot]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.getAttribute("data-appt-slot");
+        state.apptSelectedSlot =
+          (state.apptSlots || []).find((s) => s.preferredDateTime === key) || null;
+        const pane = el.apptBody.querySelector("[data-appt-slots-pane]");
+        if (pane) {
+          pane.innerHTML = renderApptSlotsPanel();
+          bindApptSlotsPane();
+        }
+        updateApptBookBtn();
+      });
+    });
+  }
+
   function renderApptModalBody() {
     const ctx = state.apptContext || {};
     return `<div class="appt-meta">
@@ -1868,8 +1898,10 @@
         state.apptSelectedSlot =
           (state.apptSlots || []).find((s) => s.preferredDateTime === key) || null;
         const pane = el.apptBody.querySelector("[data-appt-slots-pane]");
-        if (pane) pane.innerHTML = renderApptSlotsPanel();
-        bindApptModalControls();
+        if (pane) {
+          pane.innerHTML = renderApptSlotsPanel();
+          bindApptSlotsPane();
+        }
         updateApptBookBtn();
       });
     });
@@ -1953,13 +1985,16 @@
 
   async function loadApptSlotsForDate(iso) {
     if (!iso || !state.apptContext) return;
+    const reqId = (state.apptSlotsReqId = (state.apptSlotsReqId || 0) + 1);
     state.apptSelectedDate = iso;
     state.apptSelectedSlot = null;
     updateApptBookBtn();
-    el.apptBody.innerHTML = renderApptModalBody();
-    const pane = el.apptBody.querySelector("[data-appt-slots-pane]");
-    if (pane) pane.innerHTML = `<div class="asn-loading">Loading times…</div>`;
-    bindApptModalControls();
+
+    // Update selection + slots pane in place — avoid full modal re-render (height jump).
+    syncApptCalendarSelection(iso);
+    const pane = el.apptBody && el.apptBody.querySelector("[data-appt-slots-pane]");
+    if (pane) pane.innerHTML = renderApptSlotsLoading(iso);
+
     try {
       const data = await api("appointment_slots", {
         org: state.org,
@@ -1967,10 +2002,12 @@
         location: state.apptContext.facility || state.facility,
         date: iso,
       });
+      if (reqId !== state.apptSlotsReqId) return; // stale response
       if (!data.success) {
         state.apptSlots = [];
         if (pane) {
-          pane.innerHTML = `<div class="asn-error">${escapeHtml(data.error || "Could not load slots")}</div>`;
+          pane.innerHTML = `<div class="appt-slots-head">${escapeHtml(iso)}</div>
+            <div class="asn-error">${escapeHtml(data.error || "Could not load slots")}</div>`;
         }
         return;
       }
@@ -1984,15 +2021,26 @@
           if ((ranks[c] || 0) > (ranks[worst] || 0)) worst = c;
         });
         state.apptDayColors[iso] = worst;
+        const dayBtn =
+          el.apptBody &&
+          el.apptBody.querySelector('[data-appt-date="' + iso + '"]');
+        if (dayBtn) {
+          dayBtn.classList.remove("day-open", "day-green", "day-yellow", "day-red");
+          dayBtn.classList.add("day-" + worst);
+        }
       }
       // === END EXPERIMENTAL ===
-      el.apptBody.innerHTML = renderApptModalBody();
-      bindApptModalControls();
+      if (pane) {
+        pane.innerHTML = renderApptSlotsPanel();
+        bindApptSlotsPane();
+      }
       updateApptBookBtn();
     } catch (e) {
+      if (reqId !== state.apptSlotsReqId) return;
       state.apptSlots = [];
       if (pane) {
-        pane.innerHTML = `<div class="asn-error">${escapeHtml(e.message || String(e))}</div>`;
+        pane.innerHTML = `<div class="appt-slots-head">${escapeHtml(iso)}</div>
+          <div class="asn-error">${escapeHtml(e.message || String(e))}</div>`;
       }
     }
   }

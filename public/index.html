@@ -499,12 +499,28 @@
       color: var(--text-secondary);
       margin-bottom: 0.45rem;
     }
+    /* Keep right pane height stable across loading / empty / slot list */
+    .appt-slots-pane {
+      min-height: 360px;
+    }
     .appt-slots {
       display: flex;
       flex-direction: column;
       gap: 0.35rem;
+      min-height: 320px;
       max-height: 320px;
       overflow: auto;
+    }
+    .appt-slots-loading,
+    .appt-slots-pane > .asn-empty,
+    .appt-slots-pane > .asn-error {
+      min-height: 320px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
     }
     .appt-slot {
       display: flex;
