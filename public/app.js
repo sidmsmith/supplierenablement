@@ -29,8 +29,8 @@
     apptEquipmentTypes: null, // null = not loaded; [] or [{id,description}]
     // === EXPERIMENTAL: calendar day heatmap — delete these + related helpers if unwanted ===
     apptDayColors: {}, // YYYY-MM-DD -> open|green|yellow|red
-    apptDayColorsMonthKey: "", // "YYYY-M" of last fetch
-    apptDayColorsLoading: false,
+    apptDayColorsLoaded: {}, // "YYYY-M" -> true once fetched
+    apptDayColorsInFlight: {}, // "YYYY-M" -> Promise
     // === END EXPERIMENTAL: calendar day heatmap ===
     sortKey: "purchaseOrderId",
     sortAsc: true,
@@ -1112,6 +1112,7 @@
     return `<div class="asn-block-actions">
       <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-schedule
         data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
+        data-edd="${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}"
         data-focus-po="${escapeHtml(poId)}">Schedule Appointment</button>
       <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-create-lpns
         data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
@@ -1202,7 +1203,8 @@
         openScheduleAppointment(
           btn.getAttribute("data-asn-id"),
           btn.getAttribute("data-facility"),
-          btn.getAttribute("data-focus-po")
+          btn.getAttribute("data-focus-po"),
+          btn.getAttribute("data-edd")
         );
       });
     });
@@ -1963,54 +1965,107 @@
     }
   }
 
-  // === EXPERIMENTAL: calendar day heatmap — remove this function + call sites if unwanted ===
-  async function loadApptDayColorsForVisibleMonth() {
-    if (!state.apptContext || !state.apptMonth) return;
-    const m = state.apptMonth;
-    const key = m.getFullYear() + "-" + (m.getMonth() + 1);
-    if (state.apptDayColorsMonthKey === key && !state.apptDayColorsLoading) return;
-    state.apptDayColorsLoading = true;
-    state.apptDayColorsMonthKey = key;
-    try {
+  function parseApptEddDate(raw) {
+    const iso = fmtAsnEdd(raw);
+    if (!iso || iso === "—") return null;
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  function apptMonthKey(year, month) {
+    return year + "-" + month;
+  }
+
+  function nextApptMonth(year, month) {
+    if (month >= 12) return { year: year + 1, month: 1 };
+    return { year, month: month + 1 };
+  }
+
+  // === EXPERIMENTAL: calendar day heatmap — remove this block + CSS if unwanted ===
+  function refreshApptCalendarPane() {
+    if (!el.apptBody) return;
+    const pane = el.apptBody.querySelector(".appt-cal-pane");
+    if (!pane) return;
+    pane.innerHTML = renderApptCalendarGrid();
+    pane.querySelectorAll("[data-appt-month]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const delta = parseInt(btn.getAttribute("data-appt-month"), 10) || 0;
+        const cur = state.apptMonth || new Date();
+        state.apptMonth = new Date(cur.getFullYear(), cur.getMonth() + delta, 1);
+        el.apptBody.innerHTML = renderApptModalBody();
+        bindApptModalControls();
+        updateApptBookBtn();
+        loadApptDayColorsForVisibleMonth();
+      });
+    });
+    pane.querySelectorAll("[data-appt-date]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
+      });
+    });
+  }
+
+  async function fetchApptDayColorsMonth(year, month, { applyUi } = {}) {
+    if (!state.apptContext) return;
+    const key = apptMonthKey(year, month);
+    const runApply = () => {
+      if (
+        applyUi &&
+        el.apptBody &&
+        state.apptMonth &&
+        state.apptMonth.getFullYear() === year &&
+        state.apptMonth.getMonth() + 1 === month
+      ) {
+        refreshApptCalendarPane();
+      }
+    };
+    if (state.apptDayColorsLoaded[key]) {
+      runApply();
+      return;
+    }
+    if (state.apptDayColorsInFlight[key]) {
+      try {
+        await state.apptDayColorsInFlight[key];
+      } catch (e) {
+        /* ignore */
+      }
+      runApply();
+      return;
+    }
+    const promise = (async () => {
       const data = await api("appointment_day_colors", {
         org: state.org,
         token: state.token,
         location: state.apptContext.facility || state.facility,
-        year: m.getFullYear(),
-        month: m.getMonth() + 1,
+        year,
+        month,
       });
       if (data.success && data.colors) {
         state.apptDayColors = Object.assign({}, state.apptDayColors, data.colors);
-        if (el.apptBody && state.apptMonth &&
-            state.apptMonth.getFullYear() === m.getFullYear() &&
-            state.apptMonth.getMonth() === m.getMonth()) {
-          const pane = el.apptBody.querySelector(".appt-cal-pane");
-          if (pane) {
-            pane.innerHTML = renderApptCalendarGrid();
-            pane.querySelectorAll("[data-appt-month]").forEach((btn) => {
-              btn.addEventListener("click", () => {
-                const delta = parseInt(btn.getAttribute("data-appt-month"), 10) || 0;
-                const cur = state.apptMonth || new Date();
-                state.apptMonth = new Date(cur.getFullYear(), cur.getMonth() + delta, 1);
-                el.apptBody.innerHTML = renderApptModalBody();
-                bindApptModalControls();
-                updateApptBookBtn();
-                loadApptDayColorsForVisibleMonth();
-              });
-            });
-            pane.querySelectorAll("[data-appt-date]").forEach((btn) => {
-              btn.addEventListener("click", () => {
-                loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
-              });
-            });
-          }
-        }
+        state.apptDayColorsLoaded[key] = true;
       }
+    })();
+    state.apptDayColorsInFlight[key] = promise;
+    try {
+      await promise;
     } catch (e) {
       /* ignore — heatmap is optional */
     } finally {
-      state.apptDayColorsLoading = false;
+      delete state.apptDayColorsInFlight[key];
     }
+    runApply();
+  }
+
+  async function loadApptDayColorsForVisibleMonth() {
+    if (!state.apptContext || !state.apptMonth) return;
+    const year = state.apptMonth.getFullYear();
+    const month = state.apptMonth.getMonth() + 1;
+    await fetchApptDayColorsMonth(year, month, { applyUi: true });
+    // Prefetch the following month so the next-arrow feels instant.
+    const next = nextApptMonth(year, month);
+    fetchApptDayColorsMonth(next.year, next.month, { applyUi: false });
   }
   // === END EXPERIMENTAL: calendar day heatmap ===
 
@@ -2076,16 +2131,21 @@
     }
   }
 
-  async function openScheduleAppointment(asnId, facility, focusPoId) {
+  async function openScheduleAppointment(asnId, facility, focusPoId, edd) {
     if (!asnId) return;
     const now = new Date();
+    const eddDate =
+      parseApptEddDate(edd) ||
+      parseApptEddDate(state.lastAsn && state.lastAsn.asnId === asnId && state.lastAsn.edd);
+    const focus = eddDate || now;
     state.apptContext = {
       asnId,
       facility: facility || state.facility,
       focusPoId: focusPoId || "",
+      edd: eddDate ? isoDateLocal(eddDate) : "",
     };
-    state.apptMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    state.apptSelectedDate = isoDateLocal(now);
+    state.apptMonth = new Date(focus.getFullYear(), focus.getMonth(), 1);
+    state.apptSelectedDate = isoDateLocal(focus);
     state.apptSlots = [];
     state.apptSelectedSlot = null;
     state.apptTypeId = "DROP_UNLOAD";
@@ -2433,7 +2493,8 @@
       openScheduleAppointment(
         state.lastAsn.asnId,
         state.lastAsn.facility || state.facility,
-        ""
+        "",
+        state.lastAsn.edd || ""
       );
     });
   }
