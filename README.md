@@ -1,4 +1,4 @@
-# Supplier Enablement v0.2.3
+# Supplier Enablement v0.2.4
 
 CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs** against the MAWM demo environment (`salep.sce.manh.com`).
 
@@ -6,7 +6,7 @@ CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs
 |---|---|
 | **Repo** | [github.com/sidmsmith/supplierenablement](https://github.com/sidmsmith/supplierenablement) |
 | **Live** | [supplierenablement.vercel.app](https://supplierenablement.vercel.app/) |
-| **Version** | `0.2.3` (browser tab title only) |
+| **Version** | `0.2.4` (browser tab title only) |
 
 ## Features
 
@@ -17,7 +17,7 @@ CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs
 - One ASN for all assigned lines; confirm facility + EDD
 - After ASN create: **Create LPNs** modal (cartonize + standard iLPN qty) â†’ `lpn/create` â†’ list iLPN numbers by AsnId
 - Expand a PO to see **linked ASNs**
-- **Schedule Appointment** on ASN cards (calendar + slots; books with ASN attached)
+- **Schedule Appointment** on ASN cards (type/equipment dropdowns; calendar + slots; ASN attached)
 - ASN history under POs (multi-PO ASNs show all lines; other-PO lines muted) with Create LPNs / Download Labels
 - URL deep-link params for Organization, PO, Location, Theme
 
@@ -82,6 +82,8 @@ Multiple PO / criteria values: semicolons, commas, or spaces.
 | `create_lpns` | `receiving/ui/lpn/create` + iLPN search by AsnId |
 | `download_lpn_labels` | Build ZPL labels + Labelary PDF (`{AsnId}-labels.pdf`) |
 | `appointment_slots` | Dock calendar slots for a date (`calendarData`) |
+| `appointment_day_colors` | Experimental month heatmap (worst slot color/day) |
+| `equipment_types` | Trailer equipment types (`equipmentType/search`) |
 | `schedule_appointment` | Book slot + attach ASN (`scheduleAppointment`) |
 | `app_opened` | Optional usage ping |
 

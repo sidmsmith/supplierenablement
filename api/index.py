@@ -19,6 +19,8 @@ from se_service import (  # noqa: E402
     create_asn_from_staged,
     create_lpns_and_list,
     list_asns_for_po,
+    list_equipment_types,
+    load_appointment_day_colors_for_month,
     load_appointment_slots_for_date,
     load_asn_lines_for_lpn_creation,
     load_pos_detail,
@@ -33,7 +35,7 @@ PASSWORD = os.getenv("MANHATTAN_PASSWORD")
 CLIENT_SECRET = os.getenv("MANHATTAN_SECRET")
 USAGE_INGEST_URL = os.getenv("MANHATTAN_USAGE_INGEST_URL", "").strip()
 APP_NAME = "supplierenablement-app"
-APP_VERSION = "0.2.3"
+APP_VERSION = "0.2.4"
 DEFAULT_ORG = os.getenv("MANHATTAN_DEFAULT_ORG", "SS-DEMO").strip().upper() or "SS-DEMO"
 TOKEN_FILE = ROOT / ".token"
 
@@ -391,6 +393,45 @@ def appointment_slots():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/equipment_types", methods=["POST"])
+def equipment_types_route():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    try:
+        return jsonify(list_equipment_types(token, org, location=location))
+    except Exception as e:
+        print(f"[EQUIPMENT_TYPES] {e}")
+        return jsonify({"success": False, "error": str(e), "types": []}), 500
+
+
+# === EXPERIMENTAL: calendar day colors (heatmap) — remove route + UI comments if unwanted ===
+@app.route("/api/appointment_day_colors", methods=["POST"])
+def appointment_day_colors():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    try:
+        year = int(data.get("year"))
+        month = int(data.get("month"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "year and month required"}), 400
+    try:
+        return jsonify(
+            load_appointment_day_colors_for_month(
+                token, org, year, month, location=location
+            )
+        )
+    except Exception as e:
+        print(f"[APPOINTMENT_DAY_COLORS] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+# === END EXPERIMENTAL: calendar day colors ===
+
+
 @app.route("/api/schedule_appointment", methods=["POST"])
 def schedule_appointment_route():
     data = _json()
@@ -404,6 +445,12 @@ def schedule_appointment_route():
         or ""
     ).strip()
     asn_id = (data.get("asnId") or data.get("asn_id") or "").strip()
+    appointment_type_id = (
+        data.get("appointmentTypeId") or data.get("appointment_type_id") or ""
+    ).strip()
+    equipment_type_id = (
+        data.get("equipmentTypeId") or data.get("equipment_type_id") or ""
+    ).strip()
     try:
         result = book_appointment_slot(
             token,
@@ -411,6 +458,8 @@ def schedule_appointment_route():
             preferred,
             location=location,
             asn_id=asn_id or None,
+            appointment_type_id=appointment_type_id or None,
+            equipment_type_id=equipment_type_id or None,
         )
         forward_usage_event(
             {

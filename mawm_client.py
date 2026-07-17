@@ -26,6 +26,9 @@ ITEM_SEARCH_URL = f"{HOST}/item-master/api/item-master/item/search"
 ILPN_SEARCH_URL = f"{HOST}/dcinventory/api/dcinventory/ilpn/search"
 APPOINTMENT_CALENDAR_URL = f"{HOST}/appointment/api/appointment/calendarData"
 APPOINTMENT_SCHEDULE_URL = f"{HOST}/appointment/api/appointment/scheduleAppointment"
+EQUIPMENT_TYPE_SEARCH_URL = (
+    f"{HOST}/yard-management/api/yard-management/equipmentType/search"
+)
 
 # schedule_app defaults (v1 parity)
 DEFAULT_APPT_RESOURCE_GROUPS = [
@@ -636,6 +639,46 @@ def fetch_appointment_calendar(
     return body if isinstance(body, dict) else {"data": body}
 
 
+def fetch_equipment_types(
+    token: str,
+    org: str,
+    location: str = None,
+) -> List[dict]:
+    """Search trailer equipment types (same query as check_in)."""
+    dest = resolve_location(org, location)
+    payload = {
+        "Query": "StandardEquipmentTypeId=TRAILER",
+        "Size": 9999,
+        "needTotalCount": True,
+        "Template": {
+            "EquipmentTypeId": None,
+            "Description": None,
+        },
+    }
+    response = _post(
+        EQUIPMENT_TYPE_SEARCH_URL,
+        headers=build_receiving_headers(token, org, location=dest),
+        json=payload,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"equipmentType search failed: {response.status_code} {response.text[:500]}"
+        )
+    body = response.json()
+    data = body.get("data") if isinstance(body, dict) else None
+    types: List[dict] = []
+    if isinstance(data, dict):
+        types = data.get("EquipmentType") or data.get("equipmentType") or []
+        if not types:
+            for value in data.values():
+                if isinstance(value, list) and value:
+                    types = value
+                    break
+    elif isinstance(data, list):
+        types = data
+    return [t for t in types if isinstance(t, dict)]
+
+
 def schedule_appointment(
     token: str,
     org: str,
@@ -652,9 +695,11 @@ def schedule_appointment(
     if not preferred:
         raise ValueError("PreferredDateTime required")
     dest = resolve_location(org, location)
+    appt_type = str(appointment_type_id or "DROP_UNLOAD").strip() or "DROP_UNLOAD"
+    equip = str(equipment_type_id or "48FT").strip() or "48FT"
     payload = {
-        "AppointmentTypeId": appointment_type_id,
-        "EquipmentTypeId": equipment_type_id,
+        "AppointmentTypeId": appt_type,
+        "EquipmentTypeId": equip,
         "PreferredDateTime": preferred,
         "Duration": int(duration or 60),
         "AppointmentStatusId": appointment_status_id,

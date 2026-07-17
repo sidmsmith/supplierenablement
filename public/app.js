@@ -23,6 +23,14 @@
     apptSelectedDate: "", // YYYY-MM-DD
     apptSlots: [],
     apptSelectedSlot: null,
+    apptTypeId: "DROP_UNLOAD",
+    apptEquipmentId: "48FT",
+    apptEquipmentTypes: null, // null = not loaded; [] or [{id,description}]
+    // === EXPERIMENTAL: calendar day heatmap — delete these + related helpers if unwanted ===
+    apptDayColors: {}, // YYYY-MM-DD -> open|green|yellow|red
+    apptDayColorsMonthKey: "", // "YYYY-M" of last fetch
+    apptDayColorsLoading: false,
+    // === END EXPERIMENTAL: calendar day heatmap ===
     sortKey: "purchaseOrderId",
     sortAsc: true,
     sheetPoIdx: -1,
@@ -1678,6 +1686,13 @@
     return `${y}-${m}-${day}`;
   }
 
+  const APPT_TYPE_OPTIONS = [
+    { id: "DROP_UNLOAD", label: "Drop Unload" },
+    { id: "DROP_LOAD", label: "Drop Load" },
+    { id: "LIVE_UNLOAD", label: "Live Unload" },
+    { id: "LIVE_LOAD", label: "Live Load" },
+  ];
+
   function monthLabel(d) {
     return d.toLocaleString(undefined, { month: "long", year: "numeric" });
   }
@@ -1685,6 +1700,39 @@
   function updateApptBookBtn() {
     if (!el.apptBookBtn) return;
     el.apptBookBtn.disabled = !(state.apptSelectedSlot && state.apptSelectedSlot.available);
+  }
+
+  function renderApptTypeOptions() {
+    const cur = state.apptTypeId || "DROP_UNLOAD";
+    return APPT_TYPE_OPTIONS.map((o) => {
+      const sel = o.id === cur ? " selected" : "";
+      return `<option value="${escapeHtml(o.id)}"${sel}>${escapeHtml(o.label)}</option>`;
+    }).join("");
+  }
+
+  function renderApptEquipmentOptions() {
+    const cur = state.apptEquipmentId || "48FT";
+    const types = state.apptEquipmentTypes;
+    if (!types) {
+      return `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)}</option>`;
+    }
+    const ids = new Set(types.map((t) => t.equipmentTypeId));
+    let opts = types
+      .map((t) => {
+        const id = t.equipmentTypeId;
+        const label = t.description || id;
+        const sel = id === cur ? " selected" : "";
+        return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    if (cur && !ids.has(cur)) {
+      opts =
+        `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)}</option>` + opts;
+    }
+    if (!opts) {
+      opts = `<option value="48FT" selected>48FT</option>`;
+    }
+    return opts;
   }
 
   function renderApptCalendarGrid() {
@@ -1707,8 +1755,12 @@
       const iso = isoDateLocal(dt);
       const selected = iso === state.apptSelectedDate ? " selected" : "";
       const today = iso === todayIso ? " today" : "";
+      // === EXPERIMENTAL: calendar day heatmap class ===
+      const dayColor = state.apptDayColors[iso];
+      const heat = dayColor ? " day-" + dayColor : "";
+      // === END EXPERIMENTAL ===
       cells.push(
-        `<button type="button" class="appt-cal-day${selected}${today}" data-appt-date="${iso}">${day}</button>`
+        `<button type="button" class="appt-cal-day${selected}${today}${heat}" data-appt-date="${iso}">${day}</button>`
       );
     }
     return `<div class="appt-cal-nav">
@@ -1762,7 +1814,15 @@
     return `<div class="appt-meta">
         ASN <strong>${escapeHtml(ctx.asnId || "")}</strong>
         ${ctx.facility ? " · " + escapeHtml(ctx.facility) : ""}
-        <span style="color:var(--text-muted)"> · Dock 1 · 60 min · DROP_UNLOAD</span>
+        <span style="color:var(--text-muted)"> · Dock 1 · 60 min</span>
+      </div>
+      <div class="appt-controls">
+        <label class="appt-field">Type
+          <select id="apptTypeSelect" aria-label="Appointment type">${renderApptTypeOptions()}</select>
+        </label>
+        <label class="appt-field">Equipment
+          <select id="apptEquipSelect" aria-label="Equipment type">${renderApptEquipmentOptions()}</select>
+        </label>
       </div>
       <div class="appt-layout">
         <div class="appt-cal-pane">${renderApptCalendarGrid()}</div>
@@ -1772,6 +1832,18 @@
 
   function bindApptModalControls() {
     if (!el.apptBody) return;
+    const typeSel = el.apptBody.querySelector("#apptTypeSelect");
+    if (typeSel) {
+      typeSel.addEventListener("change", () => {
+        state.apptTypeId = typeSel.value || "DROP_UNLOAD";
+      });
+    }
+    const equipSel = el.apptBody.querySelector("#apptEquipSelect");
+    if (equipSel) {
+      equipSel.addEventListener("change", () => {
+        state.apptEquipmentId = equipSel.value || "48FT";
+      });
+    }
     el.apptBody.querySelectorAll("[data-appt-month]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const delta = parseInt(btn.getAttribute("data-appt-month"), 10) || 0;
@@ -1780,6 +1852,9 @@
         el.apptBody.innerHTML = renderApptModalBody();
         bindApptModalControls();
         updateApptBookBtn();
+        // === EXPERIMENTAL: calendar day heatmap ===
+        loadApptDayColorsForVisibleMonth();
+        // === END EXPERIMENTAL ===
       });
     });
     el.apptBody.querySelectorAll("[data-appt-date]").forEach((btn) => {
@@ -1799,6 +1874,82 @@
       });
     });
   }
+
+  async function ensureEquipmentTypesLoaded() {
+    if (state.apptEquipmentTypes) return;
+    try {
+      const data = await api("equipment_types", {
+        org: state.org,
+        token: state.token,
+        location: (state.apptContext && state.apptContext.facility) || state.facility,
+      });
+      if (data.success && Array.isArray(data.types) && data.types.length) {
+        state.apptEquipmentTypes = data.types;
+      } else {
+        state.apptEquipmentTypes = [{ equipmentTypeId: "48FT", description: "48FT" }];
+      }
+    } catch (e) {
+      state.apptEquipmentTypes = [{ equipmentTypeId: "48FT", description: "48FT" }];
+    }
+    if (!state.apptEquipmentId) state.apptEquipmentId = "48FT";
+    const ids = new Set(state.apptEquipmentTypes.map((t) => t.equipmentTypeId));
+    if (!ids.has(state.apptEquipmentId)) {
+      state.apptEquipmentId = ids.has("48FT")
+        ? "48FT"
+        : state.apptEquipmentTypes[0].equipmentTypeId;
+    }
+  }
+
+  // === EXPERIMENTAL: calendar day heatmap — remove this function + call sites if unwanted ===
+  async function loadApptDayColorsForVisibleMonth() {
+    if (!state.apptContext || !state.apptMonth) return;
+    const m = state.apptMonth;
+    const key = m.getFullYear() + "-" + (m.getMonth() + 1);
+    if (state.apptDayColorsMonthKey === key && !state.apptDayColorsLoading) return;
+    state.apptDayColorsLoading = true;
+    state.apptDayColorsMonthKey = key;
+    try {
+      const data = await api("appointment_day_colors", {
+        org: state.org,
+        token: state.token,
+        location: state.apptContext.facility || state.facility,
+        year: m.getFullYear(),
+        month: m.getMonth() + 1,
+      });
+      if (data.success && data.colors) {
+        state.apptDayColors = Object.assign({}, state.apptDayColors, data.colors);
+        if (el.apptBody && state.apptMonth &&
+            state.apptMonth.getFullYear() === m.getFullYear() &&
+            state.apptMonth.getMonth() === m.getMonth()) {
+          const pane = el.apptBody.querySelector(".appt-cal-pane");
+          if (pane) {
+            pane.innerHTML = renderApptCalendarGrid();
+            pane.querySelectorAll("[data-appt-month]").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                const delta = parseInt(btn.getAttribute("data-appt-month"), 10) || 0;
+                const cur = state.apptMonth || new Date();
+                state.apptMonth = new Date(cur.getFullYear(), cur.getMonth() + delta, 1);
+                el.apptBody.innerHTML = renderApptModalBody();
+                bindApptModalControls();
+                updateApptBookBtn();
+                loadApptDayColorsForVisibleMonth();
+              });
+            });
+            pane.querySelectorAll("[data-appt-date]").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
+              });
+            });
+          }
+        }
+      }
+    } catch (e) {
+      /* ignore — heatmap is optional */
+    } finally {
+      state.apptDayColorsLoading = false;
+    }
+  }
+  // === END EXPERIMENTAL: calendar day heatmap ===
 
   async function loadApptSlotsForDate(iso) {
     if (!iso || !state.apptContext) return;
@@ -1824,6 +1975,17 @@
         return;
       }
       state.apptSlots = data.slots || [];
+      // === EXPERIMENTAL: keep heatmap in sync with latest day fetch ===
+      if (data.slots && data.slots.length) {
+        const ranks = { open: 0, green: 1, yellow: 2, red: 3 };
+        let worst = "open";
+        data.slots.forEach((s) => {
+          const c = s.color || "open";
+          if ((ranks[c] || 0) > (ranks[worst] || 0)) worst = c;
+        });
+        state.apptDayColors[iso] = worst;
+      }
+      // === END EXPERIMENTAL ===
       el.apptBody.innerHTML = renderApptModalBody();
       bindApptModalControls();
       updateApptBookBtn();
@@ -1835,7 +1997,7 @@
     }
   }
 
-  function openScheduleAppointment(asnId, facility, focusPoId) {
+  async function openScheduleAppointment(asnId, facility, focusPoId) {
     if (!asnId) return;
     const now = new Date();
     state.apptContext = {
@@ -1847,6 +2009,8 @@
     state.apptSelectedDate = isoDateLocal(now);
     state.apptSlots = [];
     state.apptSelectedSlot = null;
+    state.apptTypeId = "DROP_UNLOAD";
+    state.apptEquipmentId = "48FT";
     if (el.apptHead) el.apptHead.textContent = "Schedule Appointment — " + asnId;
     if (el.apptBody) {
       el.apptBody.innerHTML = renderApptModalBody();
@@ -1854,6 +2018,14 @@
     }
     updateApptBookBtn();
     openModal(el.apptModal);
+    await ensureEquipmentTypesLoaded();
+    if (el.apptBody) {
+      el.apptBody.innerHTML = renderApptModalBody();
+      bindApptModalControls();
+    }
+    // === EXPERIMENTAL: calendar day heatmap ===
+    loadApptDayColorsForVisibleMonth();
+    // === END EXPERIMENTAL ===
     loadApptSlotsForDate(state.apptSelectedDate);
   }
 
@@ -1861,6 +2033,8 @@
     if (!state.apptSelectedSlot || !state.apptContext) return;
     const slot = state.apptSelectedSlot;
     const ctx = state.apptContext;
+    const typeId = state.apptTypeId || "DROP_UNLOAD";
+    const equipId = state.apptEquipmentId || "48FT";
     setBusy(true, "Scheduling appointment…");
     closeModal(el.apptModal);
     try {
@@ -1870,6 +2044,8 @@
         location: ctx.facility || state.facility,
         preferredDateTime: slot.preferredDateTime,
         asnId: ctx.asnId,
+        appointmentTypeId: typeId,
+        equipmentTypeId: equipId,
       });
       const ok = !!data.success;
       el.resultsHead.className = "modal-head " + (ok ? "success" : "error");
@@ -1878,6 +2054,8 @@
         <p>${escapeHtml(ok ? data.message || "Success" : data.error || "Failed")}</p>
         <p><strong>Appointment:</strong> ${escapeHtml(data.appointmentId || "—")}</p>
         <p><strong>Time:</strong> ${escapeHtml(data.preferredDateTime || slot.preferredDateTime)}</p>
+        <p><strong>Type:</strong> ${escapeHtml(data.appointmentTypeId || typeId)}
+          · <strong>Equipment:</strong> ${escapeHtml(data.equipmentTypeId || equipId)}</p>
         <p><strong>ASN:</strong> ${escapeHtml(ctx.asnId || "")}
           ${data.asnAttached ? "" : '<span style="color:var(--text-muted)">(not attached)</span>'}</p>
         <p><strong>Facility:</strong> ${escapeHtml(data.facility || ctx.facility || "")}</p>

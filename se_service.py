@@ -7,6 +7,7 @@ import base64
 import math
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -20,6 +21,7 @@ from mawm_client import (
     create_lpns,
     create_shell_asn,
     fetch_appointment_calendar,
+    fetch_equipment_types,
     get_next_asn_number,
     line_excluded_by_flags,
     po_status_description,
@@ -1247,6 +1249,94 @@ def _slot_color(utilization: float, total: int) -> str:
     return "red"
 
 
+_DAY_COLOR_RANK = {"open": 0, "green": 1, "yellow": 2, "red": 3}
+
+
+def _worst_day_color(colors: List[str]) -> str:
+    worst = "open"
+    for color in colors:
+        key = str(color or "open")
+        if _DAY_COLOR_RANK.get(key, 0) > _DAY_COLOR_RANK.get(worst, 0):
+            worst = key
+    return worst
+
+
+def list_equipment_types(
+    token: str,
+    org: str,
+    location: str = None,
+) -> Dict[str, Any]:
+    """Return trailer equipment types for the schedule dropdown (check_in parity)."""
+    dest = resolve_location(org, location)
+    try:
+        rows = fetch_equipment_types(token, org, location=dest)
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "facility": dest, "types": []}
+    types = []
+    for row in rows:
+        eid = str(row.get("EquipmentTypeId") or "").strip()
+        if not eid:
+            continue
+        types.append(
+            {
+                "equipmentTypeId": eid,
+                "description": str(row.get("Description") or eid).strip() or eid,
+            }
+        )
+    types.sort(key=lambda t: (t["description"] or "").lower())
+    return {"success": True, "facility": dest, "types": types}
+
+
+def load_appointment_day_colors_for_month(
+    token: str,
+    org: str,
+    year: int,
+    month: int,
+    location: str = None,
+) -> Dict[str, Any]:
+    """
+    EXPERIMENTAL — calendar day heatmap colors (same scheme as slots).
+    Worst slot color wins for each day. Safe to delete this helper + its route/UI.
+    """
+    try:
+        y = int(year)
+        m = int(month)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "year and month required"}
+    if m < 1 or m > 12:
+        return {"success": False, "error": "month must be 1–12"}
+    dest = resolve_location(org, location)
+    if m == 12:
+        days_in_month = 31
+    else:
+        days_in_month = (date(y, m + 1, 1) - timedelta(days=1)).day
+
+    dates = [f"{y:04d}-{m:02d}-{d:02d}" for d in range(1, days_in_month + 1)]
+    colors: Dict[str, str] = {}
+
+    def _one(day: str) -> Tuple[str, str]:
+        result = load_appointment_slots_for_date(token, org, day, location=dest)
+        if not result.get("success"):
+            return day, "open"
+        slot_colors = [s.get("color") or "open" for s in (result.get("slots") or [])]
+        return day, _worst_day_color(slot_colors)
+
+    # Parallel calendar fetches — experimental; drop with day-color UI if too heavy.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(_one, day) for day in dates]
+        for fut in as_completed(futures):
+            day, color = fut.result()
+            colors[day] = color
+
+    return {
+        "success": True,
+        "facility": dest,
+        "year": y,
+        "month": m,
+        "colors": colors,
+    }
+
+
 def load_appointment_slots_for_date(
     token: str,
     org: str,
@@ -1339,6 +1429,8 @@ def book_appointment_slot(
     preferred_date_time: str,
     location: str = None,
     asn_id: str = None,
+    appointment_type_id: str = None,
+    equipment_type_id: str = None,
 ) -> Dict[str, Any]:
     """Schedule appointment; attach ASN when asn_id is provided."""
     preferred = str(preferred_date_time or "").strip()
@@ -1346,12 +1438,27 @@ def book_appointment_slot(
         return {"success": False, "error": "preferredDateTime required"}
     dest = resolve_location(org, location)
     asn = str(asn_id or "").strip()
+    appt_type = str(appointment_type_id or "DROP_UNLOAD").strip() or "DROP_UNLOAD"
+    equip = str(equipment_type_id or "48FT").strip() or "48FT"
     try:
         body = schedule_appointment(
-            token, org, preferred, location=dest, asn_id=asn or None
+            token,
+            org,
+            preferred,
+            location=dest,
+            asn_id=asn or None,
+            appointment_type_id=appt_type,
+            equipment_type_id=equip,
         )
     except Exception as exc:
-        return {"success": False, "error": str(exc), "facility": dest, "asnId": asn or None}
+        return {
+            "success": False,
+            "error": str(exc),
+            "facility": dest,
+            "asnId": asn or None,
+            "appointmentTypeId": appt_type,
+            "equipmentTypeId": equip,
+        }
 
     data = body.get("data") if isinstance(body, dict) else None
     appointment = None
@@ -1387,6 +1494,8 @@ def book_appointment_slot(
         "facility": dest,
         "asnId": asn or None,
         "asnAttached": bool(asn),
+        "appointmentTypeId": appt_type,
+        "equipmentTypeId": equip,
         "message": msg,
         "raw": {k: v for k, v in (body or {}).items() if k != "_requestPayload"},
     }
