@@ -81,6 +81,7 @@
     resultsHead: document.getElementById("resultsHead"),
     resultsBody: document.getElementById("resultsBody"),
     resultsOk: document.getElementById("resultsOk"),
+    resultsScheduleAppt: document.getElementById("resultsScheduleAppt"),
     resultsCreateLpns: document.getElementById("resultsCreateLpns"),
     resultsDownloadLabels: document.getElementById("resultsDownloadLabels"),
     lpnModal: document.getElementById("lpnModal"),
@@ -1436,6 +1437,35 @@
     }
   }
 
+  function setResultsActionButtons({ schedule, createLpns, downloadLabels }) {
+    if (el.resultsScheduleAppt) {
+      el.resultsScheduleAppt.style.display = schedule ? "" : "none";
+    }
+    if (el.resultsCreateLpns) {
+      el.resultsCreateLpns.style.display = createLpns ? "" : "none";
+    }
+    if (el.resultsDownloadLabels) {
+      el.resultsDownloadLabels.style.display = downloadLabels ? "" : "none";
+    }
+  }
+
+  function formatApiStepsTable(steps) {
+    const rows = (steps || [])
+      .map((s) => {
+        const detail = !s.ok && s.response
+          ? `<div class="text-muted" style="font-size:0.75rem;max-width:28rem;white-space:pre-wrap;word-break:break-word;">${escapeHtml(String(s.response).slice(0, 400))}</div>`
+          : "";
+        return `<tr>
+          <td>${escapeHtml(s.step || "")}</td>
+          <td>${escapeHtml(String(s.statusCode != null ? s.statusCode : ""))}</td>
+          <td>${s.ok ? "OK" : "FAIL"}${detail}</td>
+        </tr>`;
+      })
+      .join("");
+    if (!rows) return "";
+    return `<table class="summary-table mt-3"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
   async function confirmCreate() {
     if (!state.preview) return;
     const facility =
@@ -1458,18 +1488,12 @@
       const ok = !!data.success;
       el.resultsHead.className = "modal-head " + (ok ? "success" : "error");
       el.resultsHead.textContent = ok ? "ASN Created" : "Create Failed";
-      const steps = (data.steps || [])
-        .map(
-          (s) =>
-            `<tr><td>${s.step}</td><td>${s.statusCode}</td><td>${s.ok ? "OK" : "FAIL"}</td></tr>`
-        )
-        .join("");
       el.resultsBody.innerHTML = `
-        <p>${ok ? data.message || "Success" : data.error || "Failed"}</p>
-        <p><strong>ASN:</strong> ${data.asnId || previewAsnId}</p>
-        <p><strong>Facility:</strong> ${data.facility || facility}</p>
-        <p><strong>EDD:</strong> ${data.edd || edd}</p>
-        ${steps ? `<table class="summary-table"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ""}
+        <p>${escapeHtml(ok ? data.message || "Success" : data.error || "Failed")}</p>
+        <p><strong>ASN:</strong> ${escapeHtml(data.asnId || previewAsnId)}</p>
+        <p><strong>Facility:</strong> ${escapeHtml(data.facility || facility)}</p>
+        <p><strong>Estimated Delivery Date:</strong> ${escapeHtml(data.edd || edd || "")}</p>
+        ${ok ? "" : formatApiStepsTable(data.steps)}
       `;
       if (ok) {
         const touchedPos = [
@@ -1488,22 +1512,31 @@
         clearAsnCacheForPos(touchedPos);
         updateStageUi();
         renderPoCards();
-        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
-        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+        setResultsActionButtons({
+          schedule: true,
+          createLpns: true,
+          downloadLabels: false,
+        });
         touchedPos.forEach((id) => {
           if (state.asnsExpanded[id]) ensureAsnsForPo(id, true);
         });
       } else {
-        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
-        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+        setResultsActionButtons({
+          schedule: false,
+          createLpns: false,
+          downloadLabels: false,
+        });
       }
       openModal(el.resultsModal);
     } catch (e) {
       el.resultsHead.className = "modal-head error";
       el.resultsHead.textContent = "Create Failed";
-      el.resultsBody.innerHTML = `<p>${e.message || String(e)}</p>`;
-      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
-      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
+      setResultsActionButtons({
+        schedule: false,
+        createLpns: false,
+        downloadLabels: false,
+      });
       openModal(el.resultsModal);
     } finally {
       setBusy(false);
@@ -1689,9 +1722,7 @@
 
   const APPT_TYPE_OPTIONS = [
     { id: "DROP_UNLOAD", label: "Drop Unload" },
-    { id: "DROP_LOAD", label: "Drop Load" },
     { id: "LIVE_UNLOAD", label: "Live Unload" },
-    { id: "LIVE_LOAD", label: "Live Load" },
   ];
 
   function monthLabel(d) {
@@ -2108,15 +2139,21 @@
           ${data.asnAttached ? "" : '<span style="color:var(--text-muted)">(not attached)</span>'}</p>
         <p><strong>Facility:</strong> ${escapeHtml(data.facility || ctx.facility || "")}</p>
       `;
-      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
-      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      setResultsActionButtons({
+        schedule: false,
+        createLpns: false,
+        downloadLabels: false,
+      });
       openModal(el.resultsModal);
     } catch (e) {
       el.resultsHead.className = "modal-head error";
       el.resultsHead.textContent = "Schedule Failed";
       el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
-      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
-      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      setResultsActionButtons({
+        schedule: false,
+        createLpns: false,
+        downloadLabels: false,
+      });
       openModal(el.resultsModal);
     } finally {
       setBusy(false);
@@ -2200,25 +2237,22 @@
       const chips = (data.lpns || [])
         .map((l) => `<span class="lpn-id-chip">${escapeHtml(l.ilpnId)}</span>`)
         .join("");
-      const steps = (data.steps || [])
-        .map(
-          (s) =>
-            `<tr><td>${escapeHtml(s.step)}</td><td>${s.statusCode}</td><td>${s.ok ? "OK" : "FAIL"}</td></tr>`
-        )
-        .join("");
       el.resultsBody.innerHTML = `
         <p>${escapeHtml(ok ? data.message || "Success" : data.error || "Failed")}</p>
         <p><strong>ASN:</strong> ${escapeHtml(data.asnId || state.lastAsn.asnId)}</p>
         <p><strong>Expected:</strong> ${fmtLpnCount(data.expectedLpnCount || 0)}
           · <strong>Found:</strong> ${fmtLpnCount(data.lpnCount || 0)}</p>
         ${chips ? `<div class="lpn-id-list">${chips}</div>` : ""}
-        ${steps ? `<table class="summary-table mt-3"><thead><tr><th>Step</th><th>HTTP</th><th></th></tr></thead><tbody>${steps}</tbody></table>` : ""}
+        ${ok ? "" : formatApiStepsTable(data.steps)}
       `;
       if (ok && (data.lpns || []).length) {
         state.lastLpns = data.lpns || [];
         state.lastExpectedLpnCount = data.expectedLpnCount || (data.lpns || []).length;
-        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "";
-        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+        setResultsActionButtons({
+          schedule: true,
+          createLpns: false,
+          downloadLabels: true,
+        });
         if (state.lpnFocusPoId) {
           clearAsnCacheForPos([state.lpnFocusPoId]);
           ensureAsnsForPo(state.lpnFocusPoId, true);
@@ -2226,11 +2260,13 @@
       } else {
         state.lastLpns = [];
         state.lastExpectedLpnCount = data.expectedLpnCount || 0;
-        if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
-        if (el.resultsCreateLpns) {
-          el.resultsCreateLpns.style.display =
-            ok && (data.lpnCount || 0) === 0 ? "" : ok ? "none" : "";
-        }
+        const showCreate =
+          ok && (data.lpnCount || 0) === 0 ? true : !ok;
+        setResultsActionButtons({
+          schedule: !!state.lastAsn,
+          createLpns: showCreate,
+          downloadLabels: false,
+        });
       }
       openModal(el.resultsModal);
     } catch (e) {
@@ -2238,8 +2274,11 @@
       el.resultsHead.textContent = "LPN Create Failed";
       el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
       state.lastLpns = [];
-      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
-      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      setResultsActionButtons({
+        schedule: !!state.lastAsn,
+        createLpns: true,
+        downloadLabels: false,
+      });
       openModal(el.resultsModal);
     } finally {
       setBusy(false);
@@ -2387,6 +2426,17 @@
   });
   el.confirmCreate.addEventListener("click", confirmCreate);
   el.resultsOk.addEventListener("click", refreshAfterResults);
+  if (el.resultsScheduleAppt) {
+    el.resultsScheduleAppt.addEventListener("click", () => {
+      if (!state.lastAsn || !state.lastAsn.asnId) return;
+      closeModal(el.resultsModal);
+      openScheduleAppointment(
+        state.lastAsn.asnId,
+        state.lastAsn.facility || state.facility,
+        ""
+      );
+    });
+  }
   if (el.resultsCreateLpns) {
     el.resultsCreateLpns.addEventListener("click", openCreateLpnsFromResults);
   }
@@ -2397,7 +2447,11 @@
     el.lpnCancel.addEventListener("click", () => {
       closeModal(el.lpnModal);
       if (state.lastAsn) {
-        if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "";
+        setResultsActionButtons({
+          schedule: true,
+          createLpns: true,
+          downloadLabels: false,
+        });
         openModal(el.resultsModal);
       }
     });
