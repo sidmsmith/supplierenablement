@@ -18,6 +18,11 @@
     asnsByPo: {}, // purchaseOrderId -> asn summary[] (undefined = not loaded)
     asnLoading: {}, // purchaseOrderId -> true while fetching
     asnLoadError: {}, // purchaseOrderId -> error string
+    apptContext: null, // { asnId, facility, focusPoId }
+    apptMonth: null, // Date at first of visible month
+    apptSelectedDate: "", // YYYY-MM-DD
+    apptSlots: [],
+    apptSelectedSlot: null,
     sortKey: "purchaseOrderId",
     sortAsc: true,
     sheetPoIdx: -1,
@@ -74,6 +79,11 @@
     lpnBody: document.getElementById("lpnBody"),
     lpnCancel: document.getElementById("lpnCancel"),
     lpnCreateBtn: document.getElementById("lpnCreateBtn"),
+    apptModal: document.getElementById("apptModal"),
+    apptHead: document.getElementById("apptHead"),
+    apptBody: document.getElementById("apptBody"),
+    apptCancel: document.getElementById("apptCancel"),
+    apptBookBtn: document.getElementById("apptBookBtn"),
     busyOverlay: document.getElementById("busyOverlay"),
     themeLogo: document.getElementById("themeLogo"),
     themeSelectorBtn: document.getElementById("themeSelectorBtn"),
@@ -1090,6 +1100,9 @@
           data-focus-po="${escapeHtml(poId)}">Download Labels</button>`
       : "";
     return `<div class="asn-block-actions">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-schedule
+        data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
+        data-focus-po="${escapeHtml(poId)}">Schedule Appointment</button>
       <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-create-lpns
         data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
         data-focus-po="${escapeHtml(poId)}">Create LPNs</button>
@@ -1171,6 +1184,16 @@
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         ensureAsnsForPo(btn.getAttribute("data-asn-refresh"), true);
+      });
+    });
+    root.querySelectorAll("[data-asn-schedule]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openScheduleAppointment(
+          btn.getAttribute("data-asn-id"),
+          btn.getAttribute("data-facility"),
+          btn.getAttribute("data-focus-po")
+        );
       });
     });
     root.querySelectorAll("[data-asn-create-lpns]").forEach((btn) => {
@@ -1648,6 +1671,232 @@
     `;
   }
 
+  function isoDateLocal(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function monthLabel(d) {
+    return d.toLocaleString(undefined, { month: "long", year: "numeric" });
+  }
+
+  function updateApptBookBtn() {
+    if (!el.apptBookBtn) return;
+    el.apptBookBtn.disabled = !(state.apptSelectedSlot && state.apptSelectedSlot.available);
+  }
+
+  function renderApptCalendarGrid() {
+    const month = state.apptMonth || new Date();
+    const year = month.getFullYear();
+    const mon = month.getMonth();
+    const first = new Date(year, mon, 1);
+    const startPad = first.getDay(); // Sun=0
+    const daysInMonth = new Date(year, mon + 1, 0).getDate();
+    const todayIso = isoDateLocal(new Date());
+    const dows = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+      .map((d) => `<div class="appt-cal-dow">${d}</div>`)
+      .join("");
+    const cells = [];
+    for (let i = 0; i < startPad; i++) {
+      cells.push(`<button type="button" class="appt-cal-day other-month" disabled>&nbsp;</button>`);
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dt = new Date(year, mon, day);
+      const iso = isoDateLocal(dt);
+      const selected = iso === state.apptSelectedDate ? " selected" : "";
+      const today = iso === todayIso ? " today" : "";
+      cells.push(
+        `<button type="button" class="appt-cal-day${selected}${today}" data-appt-date="${iso}">${day}</button>`
+      );
+    }
+    return `<div class="appt-cal-nav">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-appt-month="-1" aria-label="Previous month">‹</button>
+        <strong>${escapeHtml(monthLabel(month))}</strong>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-appt-month="1" aria-label="Next month">›</button>
+      </div>
+      <div class="appt-cal-grid">${dows}${cells.join("")}</div>`;
+  }
+
+  function renderApptSlotsPanel() {
+    const date = state.apptSelectedDate;
+    if (!date) {
+      return `<div class="appt-slots-head">Select a date</div><div class="asn-empty">Pick a day to load available times.</div>`;
+    }
+    const visible = (state.apptSlots || []).filter((s) => !s.full && !s.past);
+    if (!visible.length) {
+      return `<div class="appt-slots-head">${escapeHtml(date)}</div><div class="asn-empty">No open slots for this day.</div>`;
+    }
+    const rows = visible
+      .map((s) => {
+        const selected =
+          state.apptSelectedSlot &&
+          state.apptSelectedSlot.preferredDateTime === s.preferredDateTime
+            ? " selected"
+            : "";
+        const colorClass = "slot-" + (s.color || "open");
+        const meta = s.capacity
+          ? `${s.totalAppointments}/${s.capacity}`
+          : "—";
+        return `<button type="button" class="appt-slot ${colorClass}${selected}"
+            data-appt-slot="${escapeHtml(s.preferredDateTime)}"
+            ${s.available ? "" : "disabled"}>
+            <span>${escapeHtml(s.displayLabel)}</span>
+            <span class="appt-slot-meta">${escapeHtml(meta)}</span>
+          </button>`;
+      })
+      .join("");
+    return `<div class="appt-slots-head">Times for ${escapeHtml(date)}</div>
+      <div class="appt-slots">${rows}</div>
+      <div class="appt-legend">
+        <span class="leg-open">Open</span>
+        <span class="leg-green">&lt;50%</span>
+        <span class="leg-yellow">50–75%</span>
+        <span class="leg-red">&gt;75%</span>
+      </div>`;
+  }
+
+  function renderApptModalBody() {
+    const ctx = state.apptContext || {};
+    return `<div class="appt-meta">
+        ASN <strong>${escapeHtml(ctx.asnId || "")}</strong>
+        ${ctx.facility ? " · " + escapeHtml(ctx.facility) : ""}
+        <span style="color:var(--text-muted)"> · Dock 1 · 60 min · DROP_UNLOAD</span>
+      </div>
+      <div class="appt-layout">
+        <div class="appt-cal-pane">${renderApptCalendarGrid()}</div>
+        <div class="appt-slots-pane" data-appt-slots-pane>${renderApptSlotsPanel()}</div>
+      </div>`;
+  }
+
+  function bindApptModalControls() {
+    if (!el.apptBody) return;
+    el.apptBody.querySelectorAll("[data-appt-month]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const delta = parseInt(btn.getAttribute("data-appt-month"), 10) || 0;
+        const cur = state.apptMonth || new Date();
+        state.apptMonth = new Date(cur.getFullYear(), cur.getMonth() + delta, 1);
+        el.apptBody.innerHTML = renderApptModalBody();
+        bindApptModalControls();
+        updateApptBookBtn();
+      });
+    });
+    el.apptBody.querySelectorAll("[data-appt-date]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
+      });
+    });
+    el.apptBody.querySelectorAll("[data-appt-slot]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.getAttribute("data-appt-slot");
+        state.apptSelectedSlot =
+          (state.apptSlots || []).find((s) => s.preferredDateTime === key) || null;
+        const pane = el.apptBody.querySelector("[data-appt-slots-pane]");
+        if (pane) pane.innerHTML = renderApptSlotsPanel();
+        bindApptModalControls();
+        updateApptBookBtn();
+      });
+    });
+  }
+
+  async function loadApptSlotsForDate(iso) {
+    if (!iso || !state.apptContext) return;
+    state.apptSelectedDate = iso;
+    state.apptSelectedSlot = null;
+    updateApptBookBtn();
+    el.apptBody.innerHTML = renderApptModalBody();
+    const pane = el.apptBody.querySelector("[data-appt-slots-pane]");
+    if (pane) pane.innerHTML = `<div class="asn-loading">Loading times…</div>`;
+    bindApptModalControls();
+    try {
+      const data = await api("appointment_slots", {
+        org: state.org,
+        token: state.token,
+        location: state.apptContext.facility || state.facility,
+        date: iso,
+      });
+      if (!data.success) {
+        state.apptSlots = [];
+        if (pane) {
+          pane.innerHTML = `<div class="asn-error">${escapeHtml(data.error || "Could not load slots")}</div>`;
+        }
+        return;
+      }
+      state.apptSlots = data.slots || [];
+      el.apptBody.innerHTML = renderApptModalBody();
+      bindApptModalControls();
+      updateApptBookBtn();
+    } catch (e) {
+      state.apptSlots = [];
+      if (pane) {
+        pane.innerHTML = `<div class="asn-error">${escapeHtml(e.message || String(e))}</div>`;
+      }
+    }
+  }
+
+  function openScheduleAppointment(asnId, facility, focusPoId) {
+    if (!asnId) return;
+    const now = new Date();
+    state.apptContext = {
+      asnId,
+      facility: facility || state.facility,
+      focusPoId: focusPoId || "",
+    };
+    state.apptMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    state.apptSelectedDate = isoDateLocal(now);
+    state.apptSlots = [];
+    state.apptSelectedSlot = null;
+    if (el.apptHead) el.apptHead.textContent = "Schedule Appointment — " + asnId;
+    if (el.apptBody) {
+      el.apptBody.innerHTML = renderApptModalBody();
+      bindApptModalControls();
+    }
+    updateApptBookBtn();
+    openModal(el.apptModal);
+    loadApptSlotsForDate(state.apptSelectedDate);
+  }
+
+  async function confirmBookAppointment() {
+    if (!state.apptSelectedSlot || !state.apptContext) return;
+    const slot = state.apptSelectedSlot;
+    const ctx = state.apptContext;
+    setBusy(true, "Scheduling appointment…");
+    closeModal(el.apptModal);
+    try {
+      const data = await api("schedule_appointment", {
+        org: state.org,
+        token: state.token,
+        location: ctx.facility || state.facility,
+        preferredDateTime: slot.preferredDateTime,
+        asnId: ctx.asnId,
+      });
+      const ok = !!data.success;
+      el.resultsHead.className = "modal-head " + (ok ? "success" : "error");
+      el.resultsHead.textContent = ok ? "Appointment Scheduled" : "Schedule Failed";
+      el.resultsBody.innerHTML = `
+        <p>${escapeHtml(ok ? data.message || "Success" : data.error || "Failed")}</p>
+        <p><strong>Appointment:</strong> ${escapeHtml(data.appointmentId || "—")}</p>
+        <p><strong>Time:</strong> ${escapeHtml(data.preferredDateTime || slot.preferredDateTime)}</p>
+        <p><strong>ASN:</strong> ${escapeHtml(ctx.asnId || "")}
+          <span style="color:var(--text-muted)">(not attached in v1)</span></p>
+        <p><strong>Facility:</strong> ${escapeHtml(data.facility || ctx.facility || "")}</p>
+      `;
+      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      openModal(el.resultsModal);
+    } catch (e) {
+      el.resultsHead.className = "modal-head error";
+      el.resultsHead.textContent = "Schedule Failed";
+      el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
+      if (el.resultsCreateLpns) el.resultsCreateLpns.style.display = "none";
+      if (el.resultsDownloadLabels) el.resultsDownloadLabels.style.display = "none";
+      openModal(el.resultsModal);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function openCreateLpnsForAsn(asnId, facility, focusPoId) {
     if (!asnId) return;
     state.lastAsn = {
@@ -1929,6 +2178,12 @@
   }
   if (el.lpnCreateBtn) {
     el.lpnCreateBtn.addEventListener("click", confirmCreateLpns);
+  }
+  if (el.apptCancel) {
+    el.apptCancel.addEventListener("click", () => closeModal(el.apptModal));
+  }
+  if (el.apptBookBtn) {
+    el.apptBookBtn.addEventListener("click", confirmBookAppointment);
   }
 
   restoreColumns();

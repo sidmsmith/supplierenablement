@@ -24,6 +24,16 @@ ASN_LPN_CREATE_URL = f"{HOST}/receiving/api/receiving/ui/lpn/create"
 NEXTUP_URL = f"{HOST}/receiving/api/nextup/getNextupNumbersByCounterType"
 ITEM_SEARCH_URL = f"{HOST}/item-master/api/item-master/item/search"
 ILPN_SEARCH_URL = f"{HOST}/dcinventory/api/dcinventory/ilpn/search"
+APPOINTMENT_CALENDAR_URL = f"{HOST}/appointment/api/appointment/calendarData"
+APPOINTMENT_SCHEDULE_URL = f"{HOST}/appointment/api/appointment/scheduleAppointment"
+
+# schedule_app defaults (v1 parity)
+DEFAULT_APPT_RESOURCE_GROUPS = [
+    {
+        "ResourceGroupName": "Dock",
+        "ResourceUnits": [{"ResourceId": "Dock 1"}],
+    }
+]
 
 USERNAME_BASE = os.getenv("MANHATTAN_USERNAME_BASE", "sdtadmin@")
 CLIENT_ID = os.getenv("MANHATTAN_CLIENT_ID", "omnicomponent.1.0.0")
@@ -592,6 +602,78 @@ def search_purchase_orders(
             if pid:
                 out[pid] = row
     return out
+
+
+def fetch_appointment_calendar(
+    token: str,
+    org: str,
+    calendar_date: str,
+    location: str = None,
+    resource_groups: List[dict] = None,
+) -> dict:
+    """POST appointment/calendarData for one calendar day (YYYY-MM-DD)."""
+    date_only = str(calendar_date or "").strip()[:10]
+    if not date_only:
+        raise ValueError("calendar_date required (YYYY-MM-DD)")
+    dest = resolve_location(org, location)
+    payload = {
+        "FacilityId": dest,
+        "CalendarDate": f"{date_only}T05:00:00",
+        "ResourceGroups": resource_groups or DEFAULT_APPT_RESOURCE_GROUPS,
+    }
+    response = _post(
+        APPOINTMENT_CALENDAR_URL,
+        headers=build_receiving_headers(token, org, location=dest),
+        json=payload,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"calendarData failed: {response.status_code} {response.text[:500]}"
+        )
+    body = response.json()
+    if isinstance(body, dict) and body.get("success") is False:
+        raise RuntimeError(body.get("error") or body.get("message") or "calendarData failed")
+    return body if isinstance(body, dict) else {"data": body}
+
+
+def schedule_appointment(
+    token: str,
+    org: str,
+    preferred_date_time: str,
+    location: str = None,
+    appointment_type_id: str = "DROP_UNLOAD",
+    equipment_type_id: str = "48FT",
+    duration: int = 60,
+    appointment_status_id: str = "3000",
+) -> dict:
+    """POST scheduleAppointment (schedule_app payload parity)."""
+    preferred = str(preferred_date_time or "").strip()
+    if not preferred:
+        raise ValueError("PreferredDateTime required")
+    dest = resolve_location(org, location)
+    payload = {
+        "AppointmentTypeId": appointment_type_id,
+        "EquipmentTypeId": equipment_type_id,
+        "PreferredDateTime": preferred,
+        "Duration": int(duration or 60),
+        "AppointmentStatusId": appointment_status_id,
+    }
+    response = _post(
+        APPOINTMENT_SCHEDULE_URL,
+        headers=build_receiving_headers(token, org, location=dest),
+        json=payload,
+    )
+    try:
+        body = response.json()
+    except Exception:
+        body = {"raw": response.text[:1200]}
+    if response.status_code not in (200, 201):
+        raise RuntimeError(
+            f"scheduleAppointment failed: {response.status_code} {response.text[:500]}"
+        )
+    if isinstance(body, dict) and body.get("success") is False:
+        raise RuntimeError(body.get("error") or body.get("message") or "scheduleAppointment failed")
+    return body if isinstance(body, dict) else {"data": body}
 
 
 def render_zpl_labels_pdf(zpl: str, width_in: float = 4.0, height_in: float = 6.0) -> bytes:

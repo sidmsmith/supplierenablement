@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Supplier Enablement v0.2.1</title>
+  <title>Supplier Enablement v0.2.2</title>
   <!-- v0.2.0: Create ASN from PO + Create LPNs -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet" />
@@ -395,6 +395,124 @@
     }
     .lpn-mobile-card.lpn-line-focus {
       outline: 1px solid rgba(13, 110, 253, 0.35);
+    }
+    .appt-layout {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    .appt-meta {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+    }
+    .appt-cal-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .appt-cal-nav strong { font-size: 0.95rem; }
+    .appt-cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 0.25rem;
+      text-align: center;
+    }
+    .appt-cal-dow {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 0.2rem 0;
+    }
+    .appt-cal-day {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      border-radius: 6px;
+      padding: 0.45rem 0;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .appt-cal-day:hover:not(:disabled) {
+      border-color: var(--primary);
+    }
+    .appt-cal-day:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .appt-cal-day.other-month { opacity: 0.4; }
+    .appt-cal-day.selected {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .appt-cal-day.today:not(.selected) {
+      box-shadow: inset 0 0 0 1px var(--primary);
+    }
+    .appt-slots-head {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 0.45rem;
+    }
+    .appt-slots {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      max-height: 320px;
+      overflow: auto;
+    }
+    .appt-slot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem 0.65rem;
+      background: var(--card-bg);
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      color: var(--text);
+    }
+    .appt-slot:hover:not(:disabled) { border-color: var(--primary); }
+    .appt-slot:disabled { opacity: 0.4; cursor: default; }
+    .appt-slot.selected {
+      outline: 2px solid var(--primary);
+      outline-offset: 0;
+    }
+    .appt-slot.slot-open { border-left: 4px solid #6c757d; }
+    .appt-slot.slot-green { border-left: 4px solid #28a745; background: rgba(40,167,69,0.08); }
+    .appt-slot.slot-yellow { border-left: 4px solid #ffc107; background: rgba(255,193,7,0.12); }
+    .appt-slot.slot-red { border-left: 4px solid #dc3545; background: rgba(220,53,69,0.08); }
+    .appt-slot-meta { font-size: 0.75rem; color: var(--text-muted); }
+    .appt-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      margin-top: 0.65rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+    .appt-legend span::before {
+      content: "";
+      display: inline-block;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 2px;
+      margin-right: 0.3rem;
+      vertical-align: middle;
+    }
+    .appt-legend .leg-open::before { background: #6c757d; }
+    .appt-legend .leg-green::before { background: #28a745; }
+    .appt-legend .leg-yellow::before { background: #ffc107; }
+    .appt-legend .leg-red::before { background: #dc3545; }
+    @media (max-width: 700px) {
+      .appt-layout { grid-template-columns: 1fr; }
     }
     table.lines-table {
       width: 100%;
@@ -1092,6 +1210,20 @@
         <button type="button" class="btn btn-outline-secondary" id="lpnCancel">Cancel</button>
         <button type="button" class="btn btn-success" id="lpnCreateBtn">
           <i class="fas fa-boxes"></i> Create LPNs
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule Appointment modal -->
+  <div class="modal-overlay" id="apptModal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head" id="apptHead">Schedule Appointment</div>
+      <div class="modal-body" id="apptBody"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-outline-secondary" id="apptCancel">Cancel</button>
+        <button type="button" class="btn btn-success" id="apptBookBtn" disabled>
+          <i class="fas fa-calendar-check"></i> Book Appointment
         </button>
       </div>
     </div>

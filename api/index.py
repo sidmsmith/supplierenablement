@@ -14,10 +14,12 @@ if str(ROOT) not in sys.path:
 
 from mawm_client import get_manhattan_token, normalize_token, validate_org  # noqa: E402
 from se_service import (  # noqa: E402
+    book_appointment_slot,
     build_labels_pdf_for_asn,
     create_asn_from_staged,
     create_lpns_and_list,
     list_asns_for_po,
+    load_appointment_slots_for_date,
     load_asn_lines_for_lpn_creation,
     load_pos_detail,
     match_preload_entries,
@@ -31,7 +33,7 @@ PASSWORD = os.getenv("MANHATTAN_PASSWORD")
 CLIENT_SECRET = os.getenv("MANHATTAN_SECRET")
 USAGE_INGEST_URL = os.getenv("MANHATTAN_USAGE_INGEST_URL", "").strip()
 APP_NAME = "supplierenablement-app"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 DEFAULT_ORG = os.getenv("MANHATTAN_DEFAULT_ORG", "SS-DEMO").strip().upper() or "SS-DEMO"
 TOKEN_FILE = ROOT / ".token"
 
@@ -368,6 +370,63 @@ def download_lpn_labels():
         return jsonify(result)
     except Exception as e:
         print(f"[DOWNLOAD_LPN_LABELS] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/appointment_slots", methods=["POST"])
+def appointment_slots():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    day = (data.get("date") or data.get("calendarDate") or "").strip()
+    try:
+        result = load_appointment_slots_for_date(
+            token, org, day, location=location
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"[APPOINTMENT_SLOTS] {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/schedule_appointment", methods=["POST"])
+def schedule_appointment_route():
+    data = _json()
+    org, token, err = _require_auth_fields(data)
+    if err:
+        return err
+    location = (data.get("location") or data.get("facility") or "").strip() or None
+    preferred = (
+        data.get("preferredDateTime")
+        or data.get("preferred_date_time")
+        or ""
+    ).strip()
+    asn_id = (data.get("asnId") or data.get("asn_id") or "").strip()
+    try:
+        result = book_appointment_slot(
+            token,
+            org,
+            preferred,
+            location=location,
+            asn_id=asn_id or None,
+        )
+        forward_usage_event(
+            {
+                "app": APP_NAME,
+                "version": APP_VERSION,
+                "event": "schedule_appointment_completed"
+                if result.get("success")
+                else "schedule_appointment_failed",
+                "org": org,
+                "asnId": asn_id,
+                "appointmentId": result.get("appointmentId"),
+            }
+        )
+        return jsonify(result)
+    except Exception as e:
+        print(f"[SCHEDULE_APPOINTMENT] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

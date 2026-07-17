@@ -7,7 +7,7 @@ import base64
 import math
 import re
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -19,6 +19,7 @@ from mawm_client import (
     bulk_import_asn,
     create_lpns,
     create_shell_asn,
+    fetch_appointment_calendar,
     get_next_asn_number,
     line_excluded_by_flags,
     po_status_description,
@@ -27,6 +28,7 @@ from mawm_client import (
     render_zpl_labels_pdf,
     resolve_location,
     asn_status_description,
+    schedule_appointment,
     search_asn,
     search_asns_by_purchase_order,
     search_ilpns_by_asn,
@@ -34,6 +36,13 @@ from mawm_client import (
     search_purchase_order_lines,
     search_purchase_orders,
 )
+
+# schedule_app slot display parity
+APPT_DISPLAY_OFFSET_HOURS = -5
+APPT_START_HOUR = 7
+APPT_END_HOUR = 18
+APPT_UTIL_GREEN_MAX = 50
+APPT_UTIL_YELLOW_MAX = 75
 
 
 def _dec(value) -> Decimal:
@@ -1201,4 +1210,177 @@ def build_labels_pdf_for_asn(
         "contentType": "application/pdf",
         "pdfBase64": base64.b64encode(pdf_bytes).decode("ascii"),
         "lpns": enriched,
+    }
+
+
+def _parse_mawm_dt(value) -> Optional[datetime]:
+    if value is None or value == "":
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s[:19], fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _fmt_api_datetime(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:00:00")
+
+
+def _slot_color(utilization: float, total: int) -> str:
+    if total <= 0:
+        return "open"
+    if utilization < APPT_UTIL_GREEN_MAX:
+        return "green"
+    if utilization <= APPT_UTIL_YELLOW_MAX:
+        return "yellow"
+    return "red"
+
+
+def load_appointment_slots_for_date(
+    token: str,
+    org: str,
+    calendar_date: str,
+    location: str = None,
+) -> Dict[str, Any]:
+    """Fetch calendarData and return display slots for one day (schedule_app rules)."""
+    date_only = str(calendar_date or "").strip()[:10]
+    if not date_only:
+        return {"success": False, "error": "date required (YYYY-MM-DD)"}
+    dest = resolve_location(org, location)
+    raw = fetch_appointment_calendar(token, org, date_only, location=dest)
+
+    # displayKey (YYYY-MM-DDTHH:00) -> metrics
+    lookup: Dict[str, dict] = {}
+    grid = ((raw.get("data") or {}).get("GridData")) if isinstance(raw, dict) else None
+    if not isinstance(grid, list):
+        grid = []
+    for group in grid:
+        for unit in group.get("ResourceUnits") or []:
+            for interval in unit.get("IntervalCapacities") or []:
+                capacity = int(interval.get("Capacity") or 0)
+                utilization = float(interval.get("CapacityUtilization") or 0)
+                total = int(interval.get("TotalAppointment") or 0)
+                appt_ids = interval.get("AppointmentIds") or []
+                start = _parse_mawm_dt(interval.get("IntervalStart"))
+                end = _parse_mawm_dt(interval.get("IntervalEnd"))
+                if not start or not end:
+                    continue
+                cursor = start.replace(minute=0, second=0, microsecond=0)
+                while cursor < end:
+                    display = cursor + timedelta(hours=APPT_DISPLAY_OFFSET_HOURS)
+                    key = display.strftime("%Y-%m-%dT%H:00")
+                    lookup[key] = {
+                        "capacity": capacity,
+                        "capacityUtilization": utilization,
+                        "totalAppointments": total,
+                        "appointmentIds": appt_ids,
+                    }
+                    cursor = cursor + timedelta(hours=1)
+
+    now_display = datetime.now() + timedelta(hours=APPT_DISPLAY_OFFSET_HOURS)
+    slots: List[dict] = []
+    for hour in range(APPT_START_HOUR, APPT_END_HOUR + 1):
+        display_key = f"{date_only}T{hour:02d}:00"
+        meta = lookup.get(display_key) or {
+            "capacity": 0,
+            "capacityUtilization": 0,
+            "totalAppointments": 0,
+            "appointmentIds": [],
+        }
+        capacity = int(meta.get("capacity") or 0)
+        total = int(meta.get("totalAppointments") or 0)
+        utilization = float(meta.get("capacityUtilization") or 0)
+        display_dt = datetime.strptime(display_key, "%Y-%m-%dT%H:%M")
+        # API PreferredDateTime undoes display offset (same as schedule_app)
+        api_dt = display_dt - timedelta(hours=APPT_DISPLAY_OFFSET_HOURS)
+        full = capacity <= 0 or total >= capacity
+        past = display_dt < now_display.replace(minute=0, second=0, microsecond=0)
+        available = not full and not past
+        slots.append(
+            {
+                "date": date_only,
+                "hour": hour,
+                "displayLabel": display_dt.strftime("%I:%M %p").lstrip("0"),
+                "displayKey": display_key,
+                "preferredDateTime": _fmt_api_datetime(api_dt),
+                "capacity": capacity,
+                "totalAppointments": total,
+                "capacityUtilization": utilization,
+                "color": _slot_color(utilization, total),
+                "available": available,
+                "full": full,
+                "past": past,
+            }
+        )
+
+    return {
+        "success": True,
+        "date": date_only,
+        "facility": dest,
+        "slots": slots,
+        "availableCount": sum(1 for s in slots if s["available"]),
+    }
+
+
+def book_appointment_slot(
+    token: str,
+    org: str,
+    preferred_date_time: str,
+    location: str = None,
+    asn_id: str = None,
+) -> Dict[str, Any]:
+    """Schedule appointment using schedule_app defaults (ASN not attached in v1)."""
+    preferred = str(preferred_date_time or "").strip()
+    if not preferred:
+        return {"success": False, "error": "preferredDateTime required"}
+    dest = resolve_location(org, location)
+    try:
+        body = schedule_appointment(
+            token, org, preferred, location=dest
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "facility": dest}
+
+    data = body.get("data") if isinstance(body, dict) else None
+    appointment = None
+    if isinstance(data, dict):
+        appointment = data.get("Appointment") or data
+    elif isinstance(body, dict):
+        appointment = body.get("Appointment")
+
+    appointment_id = ""
+    if isinstance(appointment, dict):
+        appointment_id = str(
+            appointment.get("AppointmentId")
+            or appointment.get("appointmentId")
+            or ""
+        ).strip()
+    if not appointment_id and isinstance(data, dict):
+        appointment_id = str(data.get("AppointmentId") or "").strip()
+    if not appointment_id and isinstance(body, dict):
+        appointment_id = str(body.get("AppointmentId") or "").strip()
+
+    return {
+        "success": True,
+        "appointmentId": appointment_id or None,
+        "preferredDateTime": preferred,
+        "facility": dest,
+        "asnId": (asn_id or "").strip() or None,
+        "message": (
+            f"Appointment {appointment_id} scheduled"
+            if appointment_id
+            else "Appointment scheduled"
+        ),
+        "raw": body,
     }
