@@ -1020,6 +1020,8 @@
         state.asnsByPo[poId] = data.asns || [];
         delete state.asnLoadError[poId];
       }
+      const po = (state.purchaseOrders || []).find((p) => p.purchaseOrderId === poId);
+      if (po) po.hasAsns = (state.asnsByPo[poId] || []).length > 0;
     } catch (e) {
       state.asnLoadError[poId] = e.message || String(e);
       state.asnsByPo[poId] = [];
@@ -1047,6 +1049,23 @@
   }
 
   function renderAsnSection(poId, mobile) {
+    const loaded = Object.prototype.hasOwnProperty.call(state.asnsByPo, poId);
+    const asns = state.asnsByPo[poId] || [];
+    const po = (state.purchaseOrders || []).find((p) => p.purchaseOrderId === poId);
+    const knownEmpty = loaded && !asns.length && !state.asnLoading[poId] && !state.asnLoadError[poId];
+    const knownHas =
+      (loaded && asns.length > 0) ||
+      (!loaded && !!(po && po.hasAsns));
+    // Hide toggle entirely when this PO has no ASNs.
+    if (!knownHas && !state.asnsExpanded[poId] && !state.asnLoading[poId]) {
+      return "";
+    }
+    if (knownEmpty) {
+      if (po) po.hasAsns = false;
+      state.asnsExpanded[poId] = false;
+      return "";
+    }
+
     const open = !!state.asnsExpanded[poId];
     const chevron = `<span class="chevron asn-toggle-chevron ${open ? "open" : ""}">▶</span>`;
     const toggle = `<button type="button" class="asn-section-toggle" data-asn-toggle="${escapeHtml(poId)}">
@@ -1059,8 +1078,6 @@
 
     const loading = !!state.asnLoading[poId];
     const err = state.asnLoadError[poId];
-    const loaded = Object.prototype.hasOwnProperty.call(state.asnsByPo, poId);
-    const asns = state.asnsByPo[poId] || [];
     let body = "";
     if (loading && !loaded) {
       body = `<div class="asn-loading">Loading ASNs…</div>`;
@@ -1068,8 +1085,6 @@
       body = `<div class="asn-error">${escapeHtml(err)}
         <button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-asn-refresh="${escapeHtml(poId)}">Retry</button>
       </div>`;
-    } else if (loaded && !asns.length) {
-      body = `<div class="asn-empty">No ASNs for this PO yet.</div>`;
     } else if (loaded) {
       body = asns
         .map((asn) => (mobile ? renderAsnSheetBlock(asn, poId) : renderAsnDesktopBlock(asn, poId)))
@@ -1523,6 +1538,10 @@
         state.lastExpectedLpnCount = 0;
         state.lpnFocusPoId = "";
         clearAsnCacheForPos(touchedPos);
+        touchedPos.forEach((id) => {
+          const po = (state.purchaseOrders || []).find((p) => p.purchaseOrderId === id);
+          if (po) po.hasAsns = true;
+        });
         updateStageUi();
         renderPoCards();
         setResultsActionButtons({
@@ -1813,7 +1832,10 @@
         <strong>${escapeHtml(monthLabel(month))}</strong>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-appt-month="1" aria-label="Next month">›</button>
       </div>
-      <div class="appt-cal-grid">${dows}${cells.join("")}</div>`;
+      <div class="appt-cal-grid">${dows}${cells.join("")}</div>
+      <div class="appt-cal-today-wrap">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-appt-today>Today</button>
+      </div>`;
   }
 
   function renderApptSlotsPanel() {
@@ -1904,6 +1926,29 @@
       </div>`;
   }
 
+  function goApptCalendarToToday() {
+    const now = new Date();
+    const iso = isoDateLocal(now);
+    state.apptMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (el.apptBody) {
+      el.apptBody.innerHTML = renderApptModalBody();
+      bindApptModalControls();
+      updateApptBookBtn();
+    }
+    // === EXPERIMENTAL: calendar day heatmap ===
+    loadApptDayColorsForVisibleMonth();
+    // === END EXPERIMENTAL ===
+    loadApptSlotsForDate(iso);
+  }
+
+  function bindApptTodayButton(root) {
+    const scope = root || el.apptBody;
+    if (!scope) return;
+    scope.querySelectorAll("[data-appt-today]").forEach((btn) => {
+      btn.addEventListener("click", goApptCalendarToToday);
+    });
+  }
+
   function bindApptModalControls() {
     if (!el.apptBody) return;
     const typeSel = el.apptBody.querySelector("#apptTypeSelect");
@@ -1936,6 +1981,7 @@
         loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
       });
     });
+    bindApptTodayButton(el.apptBody);
     el.apptBody.querySelectorAll("[data-appt-slot]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const key = btn.getAttribute("data-appt-slot");
@@ -2021,6 +2067,7 @@
         loadApptSlotsForDate(btn.getAttribute("data-appt-date"));
       });
     });
+    bindApptTodayButton(pane);
   }
 
   async function fetchApptDayColorsMonth(year, month, { applyUi } = {}) {

@@ -310,16 +310,43 @@ def load_pos_detail(
     purchase_order_ids: List[str],
     location: str = None,
 ) -> Dict[str, Any]:
+    dest = resolve_location(org, location)
     raw_lines, source = search_purchase_order_lines(
-        purchase_order_ids, token, org, location=location
+        purchase_order_ids, token, org, location=dest
     )
     item_ids = [str(l.get("ItemId") or "") for l in raw_lines]
-    items = search_items(item_ids, token, org, location=location)
+    items = search_items(item_ids, token, org, location=dest)
     serialized = [serialize_line(l, items) for l in raw_lines]
+    summaries = build_po_summaries(serialized)
+
+    # Lightweight ASN existence probe (Size=1) so UI can hide empty ASN toggles.
+    if summaries:
+        def _probe(po_id: str) -> Tuple[str, bool]:
+            try:
+                rows = search_asns_by_purchase_order(
+                    po_id, token, org, location=dest, size=1
+                )
+                return po_id, bool(rows)
+            except Exception:
+                return po_id, True  # fail open — still show toggle
+
+        with ThreadPoolExecutor(max_workers=min(8, len(summaries))) as pool:
+            futures = [
+                pool.submit(_probe, str(po.get("purchaseOrderId") or ""))
+                for po in summaries
+            ]
+            has_map: Dict[str, bool] = {}
+            for fut in as_completed(futures):
+                po_id, has = fut.result()
+                if po_id:
+                    has_map[po_id] = has
+        for po in summaries:
+            po["hasAsns"] = bool(has_map.get(po.get("purchaseOrderId"), False))
+
     return {
         "success": True,
         "source": source,
-        "purchaseOrders": build_po_summaries(serialized),
+        "purchaseOrders": summaries,
         "lineCount": len(serialized),
         "eligibleLineCount": len([l for l in serialized if l["eligible"]]),
     }
