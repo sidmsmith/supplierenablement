@@ -1,4 +1,4 @@
-# Supplier Enablement v0.2.4
+# Supplier Enablement v0.2.5
 
 CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs** against the MAWM demo environment (`salep.sce.manh.com`).
 
@@ -6,7 +6,7 @@ CLI tools and a full-screen web app for **Create ASN from PO** and **Create LPNs
 |---|---|
 | **Repo** | [github.com/sidmsmith/supplierenablement](https://github.com/sidmsmith/supplierenablement) |
 | **Live** | [supplierenablement.vercel.app](https://supplierenablement.vercel.app/) |
-| **Version** | `0.2.4` (browser tab title only) |
+| **Version** | `0.2.5` (browser tab title only) |
 
 ## Features
 

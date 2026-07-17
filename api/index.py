@@ -35,7 +35,7 @@ PASSWORD = os.getenv("MANHATTAN_PASSWORD")
 CLIENT_SECRET = os.getenv("MANHATTAN_SECRET")
 USAGE_INGEST_URL = os.getenv("MANHATTAN_USAGE_INGEST_URL", "").strip()
 APP_NAME = "supplierenablement-app"
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.2.5"
 DEFAULT_ORG = os.getenv("MANHATTAN_DEFAULT_ORG", "SS-DEMO").strip().upper() or "SS-DEMO"
 TOKEN_FILE = ROOT / ".token"
 

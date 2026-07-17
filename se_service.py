@@ -22,6 +22,7 @@ from mawm_client import (
     create_shell_asn,
     fetch_appointment_calendar,
     fetch_equipment_types,
+    search_appointments_by_asn,
     get_next_asn_number,
     line_excluded_by_flags,
     po_status_description,
@@ -463,6 +464,36 @@ def _asn_line_id(line: dict) -> str:
     return ""
 
 
+def _pick_appointment_for_asn(rows: List[dict]) -> Optional[dict]:
+    """Prefer Scheduled (3000); otherwise first hit."""
+    if not rows:
+        return None
+    for row in rows:
+        if str(row.get("AppointmentStatusId") or "").strip() == "3000":
+            return row
+    return rows[0]
+
+
+def _appointment_summary_for_asn(
+    asn_id: str,
+    token: str,
+    org: str,
+    location: str = None,
+) -> Dict[str, Any]:
+    try:
+        rows = search_appointments_by_asn(asn_id, token, org, location=location)
+    except Exception:
+        return {"appointmentId": None, "appointmentStatusId": None}
+    appt = _pick_appointment_for_asn(rows)
+    if not appt:
+        return {"appointmentId": None, "appointmentStatusId": None}
+    return {
+        "appointmentId": str(appt.get("AppointmentId") or "").strip() or None,
+        "appointmentStatusId": str(appt.get("AppointmentStatusId") or "").strip() or None,
+        "appointmentPreferredDateTime": appt.get("PreferredDateTime"),
+    }
+
+
 def list_asns_for_po(
     token: str,
     org: str,
@@ -545,9 +576,33 @@ def list_asns_for_po(
                 "otherPoLineCount": other,
                 "existingLpnCount": len(lpn_ids),
                 "existingLpnIds": lpn_ids,
+                "appointmentId": None,
+                "appointmentStatusId": None,
                 "lines": lines_out,
             }
         )
+
+    # Attach linked appointment ids (AppointmentContents.AsnId search)
+    if asns:
+        with ThreadPoolExecutor(max_workers=min(6, len(asns))) as pool:
+            futures = {
+                pool.submit(
+                    _appointment_summary_for_asn,
+                    a["asnId"],
+                    token,
+                    org,
+                    dest,
+                ): a
+                for a in asns
+            }
+            for fut in as_completed(futures):
+                asn_row = futures[fut]
+                try:
+                    summary = fut.result() or {}
+                except Exception:
+                    summary = {}
+                asn_row["appointmentId"] = summary.get("appointmentId")
+                asn_row["appointmentStatusId"] = summary.get("appointmentStatusId")
 
     asns.sort(key=lambda a: a.get("asnId") or "", reverse=True)
     return {

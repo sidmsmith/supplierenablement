@@ -1104,21 +1104,30 @@
 
   function renderAsnActions(asn, poId) {
     const hasLpns = (asn.existingLpnCount || 0) > 0;
+    const hasAppt = !!(asn.appointmentId || "").trim();
     const labelsBtn = hasLpns
       ? `<button type="button" class="btn btn-sm btn-outline-primary" data-asn-labels
           data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
           data-focus-po="${escapeHtml(poId)}">Download Labels</button>`
       : "";
-    return `<div class="asn-block-actions">
-      <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-schedule
+    const scheduleBtn = hasAppt
+      ? ""
+      : `<button type="button" class="btn btn-sm btn-outline-secondary" data-asn-schedule
         data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
         data-edd="${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}"
-        data-focus-po="${escapeHtml(poId)}">Schedule Appointment</button>
+        data-focus-po="${escapeHtml(poId)}">Schedule Appointment</button>`;
+    return `<div class="asn-block-actions">
+      ${scheduleBtn}
       <button type="button" class="btn btn-sm btn-outline-secondary" data-asn-create-lpns
         data-asn-id="${escapeHtml(asn.asnId)}" data-facility="${escapeHtml(asn.facilityId || "")}"
         data-focus-po="${escapeHtml(poId)}">Create LPNs</button>
       ${labelsBtn}
     </div>`;
+  }
+
+  function renderAsnApptMeta(asn) {
+    const apptId = (asn.appointmentId || "").trim();
+    return apptId ? `<span>Appt: ${escapeHtml(apptId)}</span>` : "";
   }
 
   function renderAsnDesktopBlock(asn, poId) {
@@ -1134,6 +1143,7 @@
             <span>${escapeHtml(asn.facilityId || "")}</span>
             ${asn.vendorId ? `<span>Vendor ${escapeHtml(asn.vendorId)}</span>` : ""}
             <span>Estimated Delivery Date: ${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}</span>
+            ${renderAsnApptMeta(asn)}
             <span>${fmtLpnCount(asn.existingLpnCount || 0)}</span>
           </div>
         </div>
@@ -1171,6 +1181,7 @@
           </div>
           <div class="asn-block-meta">
             <span>Estimated Delivery Date: ${escapeHtml(fmtAsnEdd(asn.estimatedDeliveryDate))}</span>
+            ${renderAsnApptMeta(asn)}
             <span>${fmtLpnCount(asn.existingLpnCount || 0)}</span>
           </div>
         </div>
@@ -2204,6 +2215,21 @@
         createLpns: false,
         downloadLabels: false,
       });
+      if (ok) {
+        const refreshPos = [];
+        if (ctx.focusPoId) refreshPos.push(ctx.focusPoId);
+        Object.keys(state.asnsByPo || {}).forEach((poId) => {
+          const rows = state.asnsByPo[poId] || [];
+          if (rows.some((a) => a.asnId === ctx.asnId)) refreshPos.push(poId);
+        });
+        const uniquePos = [...new Set(refreshPos)];
+        if (uniquePos.length) {
+          clearAsnCacheForPos(uniquePos);
+          uniquePos.forEach((id) => {
+            if (state.asnsExpanded[id]) ensureAsnsForPo(id, true);
+          });
+        }
+      }
       openModal(el.resultsModal);
     } catch (e) {
       el.resultsHead.className = "modal-head error";

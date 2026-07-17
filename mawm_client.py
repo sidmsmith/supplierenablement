@@ -26,6 +26,7 @@ ITEM_SEARCH_URL = f"{HOST}/item-master/api/item-master/item/search"
 ILPN_SEARCH_URL = f"{HOST}/dcinventory/api/dcinventory/ilpn/search"
 APPOINTMENT_CALENDAR_URL = f"{HOST}/appointment/api/appointment/calendarData"
 APPOINTMENT_SCHEDULE_URL = f"{HOST}/appointment/api/appointment/scheduleAppointment"
+APPOINTMENT_SEARCH_URL = f"{HOST}/appointment/api/appointment/appointment/search"
 EQUIPMENT_TYPE_SEARCH_URL = (
     f"{HOST}/yard-management/api/yard-management/equipmentType/search"
 )
@@ -637,6 +638,35 @@ def fetch_appointment_calendar(
     if isinstance(body, dict) and body.get("success") is False:
         raise RuntimeError(body.get("error") or body.get("message") or "calendarData failed")
     return body if isinstance(body, dict) else {"data": body}
+
+
+def search_appointments_by_asn(
+    asn_id: str,
+    token: str,
+    org: str,
+    location: str = None,
+    size: int = 20,
+) -> List[dict]:
+    """Find appointments linked to an ASN via AppointmentContents.AsnId."""
+    asn = str(asn_id or "").strip().replace("'", "")
+    if not asn:
+        return []
+    dest = resolve_location(org, location)
+    payload = {
+        "Query": f"AppointmentContents.AsnId = '{asn}'",
+        "Size": max(1, min(int(size or 20), 100)),
+        "Page": 0,
+    }
+    response = _post(
+        APPOINTMENT_SEARCH_URL,
+        headers=build_receiving_headers(token, org, location=dest),
+        json=payload,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"appointment search failed: {response.status_code} {response.text[:500]}"
+        )
+    return _response_data_list(response.json())
 
 
 def fetch_equipment_types(
