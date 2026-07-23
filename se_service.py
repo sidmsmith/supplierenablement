@@ -641,17 +641,36 @@ def list_asns_for_po(
     }
 
 
-def _asn_line_available_qty(line: dict) -> Decimal:
+def _cartonized_qty_by_asn_line(asn: dict) -> Dict[str, Decimal]:
+    """Sum quantity already cartonized into existing LPNs, keyed by AsnLineId.
+
+    MAWM's asn/search response doesn't expose a per-line "available for LPN
+    creation" field, so we derive it from the nested Lpn[].LpnDetail[] rows
+    (each one records the AsnLineId + ShippedQuantity it consumed).
+    """
+    totals: Dict[str, Decimal] = {}
+    for lpn in asn.get("Lpn") or []:
+        for detail in lpn.get("LpnDetail") or []:
+            asn_line_id = str(detail.get("AsnLineId") or "").strip()
+            if not asn_line_id:
+                continue
+            totals[asn_line_id] = totals.get(asn_line_id, Decimal("0")) + _dec(
+                detail.get("ShippedQuantity")
+            )
+    return totals
+
+
+def _asn_line_available_qty(line: dict, already_cartonized: Decimal = Decimal("0")) -> Decimal:
     for key in (
         "AvailableQtyForLpnCreation",
         "availableQtyForLpnCreation",
         "RemainingQuantity",
         "OpenQuantity",
-        "ShippedQuantity",
     ):
         if key in line and line.get(key) is not None:
             return _dec(line.get(key))
-    return _dec(line.get("ShippedQuantity"))
+    shipped = _dec(line.get("ShippedQuantity"))
+    return max(shipped - already_cartonized, Decimal("0"))
 
 
 def load_asn_lines_for_lpn_creation(
@@ -673,13 +692,15 @@ def load_asn_lines_for_lpn_creation(
 
     item_ids = [str(l.get("ItemId") or "") for l in raw_lines if l.get("ItemId")]
     items = search_items(item_ids, token, org, location=dest) if item_ids else {}
+    cartonized_by_line = _cartonized_qty_by_asn_line(asn)
 
     lines: List[dict] = []
     for line in raw_lines:
         asn_line_id = _asn_line_id(line)
         item_id = str(line.get("ItemId") or "")
         shipped = _num(line.get("ShippedQuantity"))
-        available = _num(_asn_line_available_qty(line))
+        already_cartonized = cartonized_by_line.get(asn_line_id, Decimal("0"))
+        available = _num(_asn_line_available_qty(line, already_cartonized))
         if not asn_line_id or not item_id:
             continue
         if _dec(available) <= 0:
