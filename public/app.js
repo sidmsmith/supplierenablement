@@ -1533,6 +1533,7 @@
           asnId: data.asnId || previewAsnId,
           facility: data.facility || facility,
           edd: data.edd || edd,
+          appointmentId: "",
         };
         state.lastLpns = [];
         state.lastExpectedLpnCount = 0;
@@ -2321,6 +2322,7 @@
         alert(data.error || "Could not load ASN for LPN creation");
         return;
       }
+      state.lastAsn.appointmentId = data.appointmentId || "";
       state.lpnLines = data.lines || [];
       el.lpnHead.textContent = "Create LPNs for " + state.lastAsn.asnId;
       el.lpnBody.innerHTML = renderLpnModalBody(state.lastAsn.asnId, state.lpnLines);
@@ -2389,7 +2391,7 @@
         state.lastLpns = data.lpns || [];
         state.lastExpectedLpnCount = data.expectedLpnCount || (data.lpns || []).length;
         setResultsActionButtons({
-          schedule: true,
+          schedule: !state.lastAsn.appointmentId,
           createLpns: false,
           downloadLabels: true,
         });
@@ -2403,7 +2405,7 @@
         const showCreate =
           ok && (data.lpnCount || 0) === 0 ? true : !ok;
         setResultsActionButtons({
-          schedule: !!state.lastAsn,
+          schedule: !!state.lastAsn && !state.lastAsn.appointmentId,
           createLpns: showCreate,
           downloadLabels: false,
         });
@@ -2415,7 +2417,7 @@
       el.resultsBody.innerHTML = `<p>${escapeHtml(e.message || String(e))}</p>`;
       state.lastLpns = [];
       setResultsActionButtons({
-        schedule: !!state.lastAsn,
+        schedule: !!state.lastAsn && !state.lastAsn.appointmentId,
         createLpns: true,
         downloadLabels: false,
       });
@@ -2589,7 +2591,7 @@
       closeModal(el.lpnModal);
       if (state.lastAsn) {
         setResultsActionButtons({
-          schedule: true,
+          schedule: !state.lastAsn.appointmentId,
           createLpns: true,
           downloadLabels: false,
         });

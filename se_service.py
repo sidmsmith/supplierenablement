@@ -714,6 +714,8 @@ def load_asn_lines_for_lpn_creation(
         if lpn_id:
             existing_lpns.append(str(lpn_id))
 
+    appt = _appointment_summary_for_asn(asn_id, token, org, location=dest)
+
     return {
         "success": True,
         "asnId": asn_id,
@@ -723,6 +725,8 @@ def load_asn_lines_for_lpn_creation(
         "lines": lines,
         "existingLpnIds": existing_lpns,
         "existingLpnCount": len(existing_lpns),
+        "appointmentId": appt.get("appointmentId"),
+        "appointmentStatusId": appt.get("appointmentStatusId"),
     }
 
 
