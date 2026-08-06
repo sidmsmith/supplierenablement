@@ -99,9 +99,9 @@ def _require_auth_fields(data):
 def app_opened():
     forward_usage_event(
         {
-            "app": APP_NAME,
-            "version": APP_VERSION,
-            "event": "app_opened",
+            "app_name": APP_NAME,
+            "app_version": APP_VERSION,
+            "event_name": "app_opened",
             **(_json() or {}),
         }
     )
@@ -122,9 +122,9 @@ def auth():
     if token:
         forward_usage_event(
             {
-                "app": APP_NAME,
-                "version": APP_VERSION,
-                "event": "auth_success",
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION,
+                "event_name": "auth_success",
                 "org": org,
                 "source": source,
             }
@@ -139,7 +139,7 @@ def auth():
             }
         )
     forward_usage_event(
-        {"app": APP_NAME, "version": APP_VERSION, "event": "auth_failed", "org": org}
+        {"app_name": APP_NAME, "app_version": APP_VERSION, "event_name": "auth_failed", "org": org}
     )
     has_oauth = bool(PASSWORD and CLIENT_SECRET)
     has_file = TOKEN_FILE.is_file()
@@ -251,9 +251,9 @@ def create_asn():
         )
         forward_usage_event(
             {
-                "app": APP_NAME,
-                "version": APP_VERSION,
-                "event": "create_asn_completed" if result.get("success") else "create_asn_failed",
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION,
+                "event_name": "create_asn_completed" if result.get("success") else "create_asn_failed",
                 "org": org,
                 "asnId": asn_id,
             }
@@ -322,9 +322,9 @@ def create_lpns_route():
         )
         forward_usage_event(
             {
-                "app": APP_NAME,
-                "version": APP_VERSION,
-                "event": "create_lpns_completed"
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION,
+                "event_name": "create_lpns_completed"
                 if result.get("success")
                 else "create_lpns_failed",
                 "org": org,
@@ -359,9 +359,9 @@ def download_lpn_labels():
         )
         forward_usage_event(
             {
-                "app": APP_NAME,
-                "version": APP_VERSION,
-                "event": "download_lpn_labels"
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION,
+                "event_name": "download_lpn_labels"
                 if result.get("success")
                 else "download_lpn_labels_failed",
                 "org": org,
@@ -463,9 +463,9 @@ def schedule_appointment_route():
         )
         forward_usage_event(
             {
-                "app": APP_NAME,
-                "version": APP_VERSION,
-                "event": "schedule_appointment_completed"
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION,
+                "event_name": "schedule_appointment_completed"
                 if result.get("success")
                 else "schedule_appointment_failed",
                 "org": org,
