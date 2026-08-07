@@ -99,10 +99,10 @@ def _require_auth_fields(data):
 def app_opened():
     forward_usage_event(
         {
+            **(_json() or {}),
             "app_name": APP_NAME,
             "app_version": APP_VERSION,
             "event_name": "app_opened",
-            **(_json() or {}),
         }
     )
     return jsonify({"success": True})
